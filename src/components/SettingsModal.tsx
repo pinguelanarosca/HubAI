@@ -92,9 +92,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const handleApplyDiscoveredProfiles = () => {
     if (!syncResult || syncResult.matches.length === 0) return;
 
-    // Build the bindings according to priority (email -> name -> directory -> slot)
+    // Build the bindings according to verified match priority ONLY (email -> name -> directory)
+    // Never auto-import suggestions or unconfirmed matches
     const bindings = syncResult.matches
-      .filter((m) => m.matchedAccountId && m.detectedProfile.exists)
+      .filter((m) => m.matchedAccountId && m.detectedProfile.exists && m.matchType !== 'none')
       .map((m) => {
         const currentAcc = localConfig.accounts.find((a) => a.id === m.matchedAccountId);
         return {
@@ -118,7 +119,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
 
     if (safeBindings.length === 0) {
-      setSyncError('Nenhuma associação válida encontrada para importar.');
+      setSyncError('Nenhuma correspondência comprovada encontrada para importar automaticamente. Use a vinculação manual abaixo.');
       return;
     }
 
@@ -143,6 +144,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setShowImportPreview(false);
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
+  };
+
+  const handleExplicitLinkProfile = (detected: DetectedProfile, targetAccountId: string) => {
+    if (!targetAccountId) return;
+    const currentAcc = localConfig.accounts.find((a) => a.id === targetAccountId);
+    if (!currentAcc) return;
+
+    // Check collision
+    const collision = localConfig.accounts.find(
+      (a) =>
+        a.id !== targetAccountId &&
+        a.chromeProfileDir === detected.dirName &&
+        (a.userDataDir || localConfig.system.chromeUserDataDir) === detected.userDataDir
+    );
+
+    if (collision) {
+      setSyncError(`O perfil "${detected.dirName}" já está associado à conta "${collision.name}".`);
+      return;
+    }
+
+    setSyncError(null);
+    setLocalConfig((prev) => ({
+      ...prev,
+      accounts: prev.accounts.map((acc) => {
+        if (acc.id !== targetAccountId) return acc;
+        return {
+          ...acc,
+          chromeProfileDir: detected.dirName,
+          userDataDir: detected.userDataDir,
+          name: detected.displayName || acc.name,
+          email: detected.email || acc.email
+        };
+      })
+    }));
+
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2500);
   };
 
   const handleSaveAll = async () => {
@@ -399,17 +437,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                     {syncResult.detectedProfiles.map((p) => {
                       const match = syncResult.matches.find((m) => m.detectedProfile.dirName === p.dirName);
+                      const isConfirmed = Boolean(match && match.matchedAccountId && match.matchType !== 'none');
+                      const suggestedAcc = match?.suggestedAccountId
+                        ? localConfig.accounts.find((a) => a.id === match.suggestedAccountId)
+                        : undefined;
+
                       return (
                         <div
                           key={p.dirName}
-                          className="p-3 rounded-lg bg-neutral-900/90 border border-neutral-800 space-y-1.5 text-xs"
+                          className={`p-3 rounded-lg border space-y-2 text-xs transition-colors ${
+                            isConfirmed
+                              ? 'bg-neutral-900/90 border-emerald-800/60'
+                              : 'bg-neutral-900/50 border-neutral-800'
+                          }`}
                         >
-                          <div className="flex items-center justify-between">
+                          <div className="flex items-center justify-between gap-1">
                             <span className="font-semibold text-neutral-100 truncate">
                               {p.displayName || p.dirName}
                             </span>
                             <span
-                              className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                              className={`text-[10px] font-mono px-1.5 py-0.5 rounded border shrink-0 ${
                                 p.isLocked
                                   ? 'bg-amber-950/60 border-amber-800 text-amber-300'
                                   : 'bg-emerald-950/60 border-emerald-800 text-emerald-400'
@@ -420,17 +467,60 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           </div>
 
                           <div className="text-[11px] text-neutral-400 font-mono truncate">
-                            {p.email || 'Email não associado no perfil'}
+                            {p.email || 'Email não configurado no perfil'}
                           </div>
 
                           <div className="text-[10px] text-neutral-500 font-mono truncate" title={p.fullPath}>
                             {p.dirName} ({p.browserType})
                           </div>
 
-                          {match && match.currentAccount && (
-                            <div className="pt-1 border-t border-neutral-800 text-[10px] text-indigo-400 flex items-center justify-between">
-                              <span>Sugerido para: <strong>{match.currentAccount.name}</strong></span>
-                              <span className="capitalize opacity-80 font-mono">({match.matchType})</span>
+                          {/* Match State & Actions */}
+                          {isConfirmed && match?.currentAccount && (
+                            <div className="pt-1.5 border-t border-emerald-900/40 text-[11px] text-emerald-400 flex items-center justify-between">
+                              <span className="truncate">
+                                Vinculado a: <strong>{match.currentAccount.name}</strong>
+                              </span>
+                              <span className="text-[10px] font-mono uppercase bg-emerald-950 px-1 rounded text-emerald-300 border border-emerald-800">
+                                {match.matchType}
+                              </span>
+                            </div>
+                          )}
+
+                          {!isConfirmed && suggestedAcc && (
+                            <div className="pt-1.5 border-t border-neutral-800 space-y-1.5">
+                              <div className="text-[10px] text-amber-400/90 flex items-center justify-between">
+                                <span>Sugestão: {suggestedAcc.name}</span>
+                                <span className="text-[9px] font-mono text-neutral-500">(Não vinculada)</span>
+                              </div>
+                              <button
+                                onClick={() => handleExplicitLinkProfile(p, suggestedAcc.id)}
+                                className="w-full py-1 px-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded text-[11px] font-medium border border-neutral-700 hover:border-neutral-600 transition-colors text-center"
+                              >
+                                Vincular a {suggestedAcc.name}
+                              </button>
+                            </div>
+                          )}
+
+                          {!isConfirmed && !suggestedAcc && (
+                            <div className="pt-1.5 border-t border-neutral-800 space-y-1">
+                              <div className="text-[10px] text-neutral-500">Perfil não associado:</div>
+                              <select
+                                defaultValue=""
+                                onChange={(e) => {
+                                  if (e.target.value) {
+                                    handleExplicitLinkProfile(p, e.target.value);
+                                    e.target.value = '';
+                                  }
+                                }}
+                                className="w-full bg-neutral-950 border border-neutral-800 rounded px-1.5 py-1 text-[11px] text-neutral-300 focus:outline-none focus:border-emerald-500"
+                              >
+                                <option value="">Vincular manualmente a uma conta...</option>
+                                {localConfig.accounts.map((acc) => (
+                                  <option key={acc.id} value={acc.id}>
+                                    {acc.name} (Atual: {acc.chromeProfileDir})
+                                  </option>
+                                ))}
+                              </select>
                             </div>
                           )}
                         </div>

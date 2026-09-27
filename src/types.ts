@@ -66,6 +66,7 @@ export interface BrowserVariant {
 export interface ProfileSyncMatch {
   detectedProfile: DetectedProfile;
   matchedAccountId?: string;
+  suggestedAccountId?: string;
   matchType: 'email' | 'name' | 'directory' | 'manual' | 'none';
   confidence: 'high' | 'medium' | 'low';
   currentAccount?: HubAccount;

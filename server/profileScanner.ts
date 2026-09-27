@@ -371,25 +371,18 @@ export class ProfileScanner {
     // Unmatched detected profiles
     const unmatchedProfiles = detectedProfiles.filter(p => !matchedProfileDirs.has(p.dirName));
 
-    // Suggest remaining slots for unmatched profiles (without auto-assigning)
+    // For unmatched profiles: NEVER populate matchedAccountId and NEVER add to matchedAccountIds.
+    // Unmatched profiles remain explicitly matchType: 'none' with matchedAccountId: undefined.
     for (const remaining of unmatchedProfiles) {
       const freeAccount = currentAccounts.find(acc => !matchedAccountIds.has(acc.id));
-      if (freeAccount) {
-        matchedAccountIds.add(freeAccount.id);
-        matches.push({
-          detectedProfile: remaining,
-          matchedAccountId: freeAccount.id,
-          matchType: 'manual',
-          confidence: 'low',
-          currentAccount: freeAccount
-        });
-      } else {
-        matches.push({
-          detectedProfile: remaining,
-          matchType: 'none',
-          confidence: 'low'
-        });
-      }
+      matches.push({
+        detectedProfile: remaining,
+        matchedAccountId: undefined,
+        suggestedAccountId: freeAccount ? freeAccount.id : undefined,
+        matchType: 'none',
+        confidence: 'low',
+        currentAccount: undefined
+      });
     }
 
     const unmatchedAccounts = currentAccounts.filter(acc => {
@@ -410,7 +403,7 @@ export class ProfileScanner {
       stats: {
         totalDetected: detectedProfiles.length,
         totalConfigured: currentAccounts.length,
-        matchedCount: matches.filter(m => m.matchedAccountId).length,
+        matchedCount: matches.filter(m => m.matchedAccountId && m.matchType !== 'none').length,
         unmatchedDetectedCount: unmatchedProfiles.length,
         unmatchedAccountsCount: unmatchedAccounts.length
       }
@@ -432,6 +425,26 @@ export class ProfileScanner {
 
     if (!Array.isArray(bindings) || bindings.length === 0) {
       return { success: false, updatedAccountsCount: 0, errors: ['Nenhuma associação de perfil foi enviada para importação.'] };
+    }
+
+    // Validate that each binding has a valid existing accountId and profileDir
+    for (let i = 0; i < bindings.length; i++) {
+      const b = bindings[i];
+      if (!b || typeof b !== 'object') {
+        errors.push(`Associação no índice ${i} é inválida.`);
+        continue;
+      }
+      if (!b.accountId || typeof b.accountId !== 'string' || b.accountId.trim() === '') {
+        errors.push(`Associação para o perfil "${b.profileDir || i}" não possui "accountId" explicitamente definido.`);
+        continue;
+      }
+      const targetAcc = config.accounts.find(a => a.id === b.accountId);
+      if (!targetAcc) {
+        errors.push(`A conta "${b.accountId}" especificada na associação não existe nas configurações do Hub.`);
+      }
+      if (!b.profileDir || typeof b.profileDir !== 'string' || b.profileDir.trim() === '') {
+        errors.push(`A conta "${b.accountId}" possui "profileDir" vazio na importação.`);
+      }
     }
 
     // Check duplicate profile assignment in the incoming bindings

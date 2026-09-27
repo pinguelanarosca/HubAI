@@ -167,22 +167,72 @@ async function runIntegrationTests() {
     const syncRes = scanner.syncAccountsWithProfiles(tempChromeDataDir);
     assert.strictEqual(syncRes.stats.totalDetected, 3);
 
+    // 1. Match por Email (Prioridade 1)
     const emailMatch = syncRes.matches.find(m => m.matchedAccountId === 'acc_target_email');
     assert.ok(emailMatch, 'Match por email deve ser encontrado');
     assert.strictEqual(emailMatch?.matchType, 'email');
     assert.strictEqual(emailMatch?.detectedProfile.dirName, 'Default');
 
+    // 2. Match por Nome (Prioridade 2)
     const nameMatch = syncRes.matches.find(m => m.matchedAccountId === 'acc_target_name');
     assert.ok(nameMatch, 'Match por nome deve ser encontrado');
     assert.strictEqual(nameMatch?.matchType, 'name');
     assert.strictEqual(nameMatch?.detectedProfile.dirName, 'Profile 1');
 
-    console.log('✓ PASSOU: Prioridade de correspondência (E-mail -> Nome -> Diretório) validada.');
+    // 3. Perfil Desconhecido (NÃO recebe matchedAccountId, permanece matchType 'none')
+    const unverifiedMatch = syncRes.matches.find(m => m.detectedProfile.dirName === 'Profile 2');
+    assert.ok(unverifiedMatch, 'Perfil não correspondido deve constar na lista');
+    assert.strictEqual(unverifiedMatch?.matchedAccountId, undefined, 'Perfil desconhecido NÃO deve receber matchedAccountId');
+    assert.strictEqual(unverifiedMatch?.matchType, 'none', 'Perfil desconhecido deve ter matchType none');
+    assert.strictEqual(unverifiedMatch?.suggestedAccountId, 'acc_free_slot', 'Sugestão manual deve indicar slot livre sem vincular');
+
+    // 4. Match por Diretório (Prioridade 3)
+    const dirTestConfig: HubConfig = {
+      ...testConfig,
+      accounts: [
+        {
+          id: 'acc_target_dir',
+          name: 'Conta Determinística',
+          email: '',
+          chromeProfileDir: 'Profile 2', // Match por diretório com Profile 2
+          color: '#ec4899',
+          avatarIcon: 'Cpu',
+          order: 1
+        }
+      ]
+    };
+    testConfigManager.saveConfig(dirTestConfig);
+    const dirSyncRes = scanner.syncAccountsWithProfiles(tempChromeDataDir, dirTestConfig.accounts);
+    const dirMatch = dirSyncRes.matches.find(m => m.matchedAccountId === 'acc_target_dir');
+    assert.ok(dirMatch, 'Match por diretório configurado deve ser encontrado');
+    assert.strictEqual(dirMatch?.matchType, 'directory');
+    assert.strictEqual(dirMatch?.detectedProfile.dirName, 'Profile 2');
+
+    // Restaurar testConfig para os testes subsequentes
+    testConfigManager.saveConfig(testConfig);
+
+    console.log('✓ PASSOU: Prioridade de correspondência (E-mail -> Nome -> Diretório) e isolamento de perfis desconhecidos validados.');
 
     // -------------------------------------------------------------------------
-    // TESTE 4: Importação de contas descobertas
+    // TESTE 4: Importação de contas descobertas e rejeição de importações inválidas
     // -------------------------------------------------------------------------
     console.log('[TESTE 4] Testando importação segura de contas...');
+
+    // 4.1 Rejeição de importação sem accountId explícito
+    const invalidBindingResult = scanner.importMatchedProfiles([
+      { accountId: '', profileDir: 'Default', userDataDir: tempChromeDataDir }
+    ]);
+    assert.strictEqual(invalidBindingResult.success, false);
+    assert.ok(invalidBindingResult.errors?.some(e => e.includes('accountId')));
+
+    // 4.2 Rejeição de importação com conta inexistente no Hub
+    const nonExistentAccResult = scanner.importMatchedProfiles([
+      { accountId: 'acc_fantasma_inexistente', profileDir: 'Default', userDataDir: tempChromeDataDir }
+    ]);
+    assert.strictEqual(nonExistentAccResult.success, false);
+    assert.ok(nonExistentAccResult.errors?.some(e => e.includes('não existe')));
+
+    // 4.3 Importação legítima de perfis confirmados
     const importBindings: ProfileImportBinding[] = [
       {
         accountId: 'acc_target_email',
@@ -208,7 +258,12 @@ async function runIntegrationTests() {
     const acc1 = updatedConf.accounts.find(a => a.id === 'acc_target_email');
     assert.strictEqual(acc1?.chromeProfileDir, 'Default');
     assert.strictEqual(acc1?.name, 'Alexandre Principal Importado');
-    console.log('✓ PASSOU: Importação de contas aplica alterações sem sobrescrever dados acidentalmente.');
+
+    // Garantir que a Conta 3 (livre) não foi tocada por sugestão manual
+    const acc3 = updatedConf.accounts.find(a => a.id === 'acc_free_slot');
+    assert.strictEqual(acc3?.chromeProfileDir, 'Profile 97', 'Conta livre não pode ser alterada por sugestão manual sem importação');
+
+    console.log('✓ PASSOU: Importação de contas aplica alterações confirmadas sem sobrescrever dados acidentalmente.');
 
     // -------------------------------------------------------------------------
     // TESTE 5: Prevenção de duplicação de perfil na importação e na validação
