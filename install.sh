@@ -111,6 +111,20 @@ LOG_DIR="$HUBAI_CONFIG_DIR/logs"
 LOG_FILE="$LOG_DIR/hubai.log"
 PID_FILE="$HUBAI_CONFIG_DIR/hubai.pid"
 
+PORT="${PORT:-${HUBAI_PORT:-3000}}"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --port|-p)
+      PORT="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+export PORT="$PORT"
+
 mkdir -p "$LOG_DIR"
 
 if [ ! -d "$INSTALL_DIR" ]; then
@@ -124,9 +138,9 @@ if [ -f "$PID_FILE" ]; then
   EXISTING_PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
   if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
     echo "HubAI já está em execução (PID: $EXISTING_PID)."
-    echo "Acesse no navegador: http://localhost:3000"
+    echo "Acesse no navegador: http://localhost:$PORT"
     if command -v xdg-open &>/dev/null && [ -n "$DISPLAY$WAYLAND_DISPLAY" ]; then
-      xdg-open "http://localhost:3000" &>/dev/null || true
+      xdg-open "http://localhost:$PORT" &>/dev/null || true
     fi
     exit 0
   else
@@ -147,7 +161,7 @@ NEW_PID=$!
 echo "$NEW_PID" > "$PID_FILE"
 
 echo "HubAI iniciado com sucesso (PID: $NEW_PID)."
-echo "Painel disponível em: http://localhost:3000"
+echo "Painel disponível em: http://localhost:$PORT"
 echo "Logs gravados em:      $LOG_FILE"
 EOF
 
