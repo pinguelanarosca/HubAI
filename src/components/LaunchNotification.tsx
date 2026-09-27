@@ -1,13 +1,18 @@
 import React, { useState } from 'react';
 import { LaunchResult } from '../types.js';
-import { Check, Copy, ExternalLink, Shield, Terminal, X, AlertTriangle } from '../utils/icons.js';
+import { Check, Copy, ExternalLink, Shield, Terminal, X, AlertTriangle, Settings } from '../utils/icons.js';
 
 interface LaunchNotificationProps {
   result: LaunchResult | null;
   onDismiss: () => void;
+  onOpenSettings?: () => void;
 }
 
-export const LaunchNotification: React.FC<LaunchNotificationProps> = ({ result, onDismiss }) => {
+export const LaunchNotification: React.FC<LaunchNotificationProps> = ({
+  result,
+  onDismiss,
+  onOpenSettings
+}) => {
   const [copied, setCopied] = useState(false);
 
   if (!result) return null;
@@ -65,9 +70,25 @@ export const LaunchNotification: React.FC<LaunchNotificationProps> = ({ result, 
 
       {/* Error or Warning Message */}
       {isFailure ? (
-        <div className="mt-3 p-2.5 bg-rose-950/50 border border-rose-800/80 rounded-md text-xs text-rose-300 leading-normal">
-          <span className="font-semibold block mb-0.5">Erro de Isolamento / Validação:</span>
-          <span>{result.message}</span>
+        <div className="mt-3 p-2.5 bg-rose-950/50 border border-rose-800/80 rounded-md text-xs text-rose-300 leading-normal space-y-2">
+          <div>
+            <span className="font-semibold block mb-0.5">Erro de Isolamento / Validação:</span>
+            <span>{result.message}</span>
+          </div>
+          {onOpenSettings && (
+            <div className="pt-1.5 border-t border-rose-900/40 flex items-center justify-between">
+              <button
+                onClick={() => {
+                  onDismiss();
+                  onOpenSettings();
+                }}
+                className="text-[11px] font-medium text-rose-200 hover:text-white flex items-center gap-1.5 underline underline-offset-2 transition-colors"
+              >
+                <Settings className="w-3.5 h-3.5" />
+                <span>Configurar Navegador / Sincronizar Perfis</span>
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <>

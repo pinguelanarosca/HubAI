@@ -213,6 +213,7 @@ export default function App() {
       <LaunchNotification
         result={lastLaunchResult}
         onDismiss={() => setLastLaunchResult(null)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
       {/* Comprehensive 5-Point Diagnostic Modal */}
