@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   RefreshCw,
   CheckCircle2,
@@ -17,37 +17,77 @@ interface UpdateModalProps {
   onClose: () => void;
 }
 
+type UpdatePhase = 'idle' | 'checking' | 'available' | 'updating' | 'restarting' | 'updated' | 'error';
+
 export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
-  const [checking, setChecking] = useState(false);
-  const [updating, setUpdating] = useState(false);
+  const [phase, setPhase] = useState<UpdatePhase>('idle');
   const [updateResult, setUpdateResult] = useState<UpdateApplyResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState(false);
+  const [pollCount, setPollCount] = useState(0);
+  const pollingRef = useRef<number | null>(null);
 
   const loadStatus = async (force: boolean = false) => {
-    setChecking(true);
+    setPhase('checking');
     setError(null);
     try {
       const data = await fetchUpdateStatus(force);
       setStatus(data);
+      if (data.hasUpdate) {
+        setPhase('available');
+      } else {
+        setPhase('idle');
+      }
     } catch (err: any) {
-      setError(err.message || 'Falha ao verificar atualizações.');
-    } finally {
-      setChecking(false);
+      setError(err.message || 'Falha ao verificar atualizações no repositório.');
+      setPhase('error');
     }
   };
 
   useEffect(() => {
     loadStatus(false);
+    return () => {
+      if (pollingRef.current) {
+        window.clearTimeout(pollingRef.current);
+      }
+    };
   }, []);
 
-  const handleApplyUpdate = async () => {
-    if (!window.confirm('Deseja iniciar a atualização segura? Um backup automático da versão atual será criado antes da instalação.')) {
+  const pollServerRestart = (attempt: number = 0) => {
+    setPollCount(attempt);
+    if (attempt > 40) {
+      setError('O servidor demorou mais do que o esperado para reiniciar. Verifique os logs em ~/.config/hubai/logs/updater.log.');
+      setPhase('error');
       return;
     }
 
-    setUpdating(true);
+    pollingRef.current = window.setTimeout(async () => {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        const res = await fetch('/api/config', { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (res.ok) {
+          const freshStatus = await fetchUpdateStatus(true).catch(() => null);
+          if (freshStatus) setStatus(freshStatus);
+          setPhase('updated');
+        } else {
+          pollServerRestart(attempt + 1);
+        }
+      } catch {
+        pollServerRestart(attempt + 1);
+      }
+    }, 2000);
+  };
+
+  const handleApplyUpdate = async () => {
+    if (!window.confirm('Deseja iniciar a atualização autônoma? Um backup completo da versão atual será criado em ~/.config/hubai/backups/ antes de compilar a nova versão.')) {
+      return;
+    }
+
+    setPhase('updating');
     setError(null);
     setUpdateResult(null);
 
@@ -55,15 +95,17 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
       const res = await applyHubUpdate();
       setUpdateResult(res);
       if (res.success) {
-        // Refresh status after update
-        loadStatus(true);
+        // External updater has taken over the update lifecycle and will restart the server
+        setPhase('restarting');
+        pollServerRestart(1);
       } else {
         setError(res.error || res.message);
+        setPhase('error');
       }
     } catch (err: any) {
-      setError(err.message || 'Falha durante o processo de atualização.');
-    } finally {
-      setUpdating(false);
+      // If connection was severed because server is restarting right away, also begin polling
+      setPhase('restarting');
+      pollServerRestart(1);
     }
   };
 
@@ -74,17 +116,17 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
         <div className="px-6 py-4 border-b border-neutral-800 flex items-center justify-between bg-neutral-950">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-indigo-950/80 border border-indigo-800/80 flex items-center justify-center text-indigo-400">
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className={`w-4 h-4 ${phase === 'checking' || phase === 'updating' || phase === 'restarting' ? 'animate-spin' : ''}`} />
             </div>
             <div>
               <h2 className="text-sm font-semibold text-neutral-100 flex items-center gap-2">
-                <span>Atualizador do HubAI</span>
+                <span>Atualizador Autônomo do HubAI</span>
                 <span className="text-[10px] bg-neutral-800 border border-neutral-700 px-1.5 py-0.5 rounded text-neutral-400 font-mono">
                   Linux
                 </span>
               </h2>
               <span className="text-xs text-neutral-400 font-normal">
-                Verificação com backup automático e rollback seguro
+                Atualização externa independente com backup automático e rollback
               </span>
             </div>
           </div>
@@ -99,27 +141,83 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
 
         {/* Content */}
         <div className="p-6 space-y-5 overflow-y-auto max-h-[75vh]">
-          {/* Status Box */}
-          {checking ? (
+          {/* Phase: Checking */}
+          {phase === 'checking' && (
             <div className="py-12 text-center">
               <RefreshCw className="w-7 h-7 text-indigo-400 animate-spin mx-auto mb-3" />
-              <p className="text-xs text-neutral-300">Consultando repositório GitHub (pinguelanarosca/HubAI)...</p>
+              <p className="text-xs text-neutral-300 font-medium">Verificando atualizações...</p>
+              <p className="text-[11px] text-neutral-500 mt-1">Consultando commits no GitHub (pinguelanarosca/HubAI)...</p>
             </div>
-          ) : error ? (
-            <div className="p-4 bg-rose-950/40 border border-rose-800/80 rounded-xl text-rose-300 text-xs flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-              <div>
-                <span className="font-semibold block mb-1">Aviso ao Verificar Atualizações:</span>
-                <p className="leading-relaxed opacity-90">{error}</p>
+          )}
+
+          {/* Phase: Updating / Compiling */}
+          {phase === 'updating' && (
+            <div className="py-10 text-center space-y-3 bg-neutral-950/50 border border-neutral-800 rounded-xl p-6">
+              <RefreshCw className="w-8 h-8 text-indigo-400 animate-spin mx-auto" />
+              <h3 className="text-sm font-semibold text-neutral-200">Atualizando HubAI...</h3>
+              <p className="text-xs text-neutral-400 max-w-md mx-auto leading-relaxed">
+                O atualizador externo autônomo está criando backup em <code className="text-neutral-300">~/.config/hubai/backups/</code>, obtendo a versão recente e compilando a nova instalação em diretório temporário isolado.
+              </p>
+            </div>
+          )}
+
+          {/* Phase: Restarting & Polling */}
+          {phase === 'restarting' && (
+            <div className="py-10 text-center space-y-3 bg-neutral-950/50 border border-indigo-900/50 rounded-xl p-6">
+              <RefreshCw className="w-8 h-8 text-indigo-400 animate-spin mx-auto" />
+              <h3 className="text-sm font-semibold text-indigo-300">Reiniciando HubAI...</h3>
+              <p className="text-xs text-neutral-400 max-w-md mx-auto leading-relaxed">
+                A nova versão foi compilada com sucesso. O processo antigo foi finalizado e a nova instância do HubAI está iniciando.
+              </p>
+              <div className="text-[11px] font-mono text-neutral-500">
+                Aguardando reconexão (tentativa {pollCount}/40)...
+              </div>
+            </div>
+          )}
+
+          {/* Phase: Updated Success */}
+          {phase === 'updated' && (
+            <div className="p-4 bg-emerald-950/40 border border-emerald-800 rounded-xl text-xs space-y-2">
+              <div className="flex items-center gap-2 font-semibold text-emerald-300 text-sm">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                <span>Atualizado com sucesso!</span>
+              </div>
+              <p className="text-emerald-400/90 leading-relaxed">
+                O HubAI foi atualizado para a versão mais recente e reiniciado automaticamente. Suas configurações em <code className="text-neutral-200">~/.config/hubai/</code> foram preservadas intactas.
+              </p>
+              <div className="pt-2 border-t border-emerald-900/40 flex items-center justify-between font-mono text-[11px] text-neutral-400">
+                <span>Commit ativo: <strong className="text-neutral-200">{status?.latestCommit?.slice(0, 10) || 'recente'}</strong></span>
                 <button
-                  onClick={() => loadStatus(true)}
-                  className="mt-3 px-3 py-1 bg-rose-900/60 hover:bg-rose-900 border border-rose-700 rounded text-[11px] text-white transition-colors"
+                  onClick={() => window.location.reload()}
+                  className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded text-[11px] font-sans font-medium transition-colors"
                 >
-                  Tentar Novamente
+                  Recarregar Interface
                 </button>
               </div>
             </div>
-          ) : status ? (
+          )}
+
+          {/* Phase: Error / Rollback */}
+          {error && phase !== 'updating' && phase !== 'restarting' && (
+            <div className="p-4 bg-rose-950/40 border border-rose-800/80 rounded-xl text-rose-300 text-xs flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <span className="font-semibold block mb-1">Falha / Rollback Realizado:</span>
+                <p className="leading-relaxed opacity-90">{error}</p>
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    onClick={() => loadStatus(true)}
+                    className="px-3 py-1 bg-rose-900/60 hover:bg-rose-900 border border-rose-700 rounded text-[11px] text-white transition-colors"
+                  >
+                    Tentar Novamente
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Version Details when idle or available */}
+          {status && phase !== 'updating' && phase !== 'restarting' && (
             <>
               {/* Main Update State Card */}
               <div
@@ -138,23 +236,23 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
                   <div>
                     <h3 className="text-sm font-semibold">
                       {status.hasUpdate
-                        ? 'Nova versão do HubAI disponível no GitHub!'
-                        : 'HubAI já está atualizado.'}
+                        ? 'Atualização disponível no GitHub!'
+                        : 'HubAI já está na versão mais recente.'}
                     </h3>
                     <p className="text-xs opacity-80 mt-1 leading-normal">
                       {status.hasUpdate
-                        ? 'Uma atualização foi encontrada no repositório. O processo criará um backup de segurança antes de aplicar a nova versão.'
-                        : 'Você está utilizando a versão mais recente registrada para o seu ambiente.'}
+                        ? 'Uma nova versão está disponível no repositório oficial. A atualização será executada de forma atômica por um processo externo com backup prévio.'
+                        : 'Você está utilizando a versão mais recente registrada no ambiente Linux.'}
                     </p>
                   </div>
                 </div>
 
                 <button
                   onClick={() => loadStatus(true)}
-                  disabled={checking || updating}
+                  disabled={phase === 'checking'}
                   className="px-2.5 py-1 text-xs rounded bg-neutral-900/60 hover:bg-neutral-900 border border-neutral-700/60 text-neutral-300 hover:text-white shrink-0 transition-colors flex items-center gap-1.5"
                 >
-                  <RefreshCw className={`w-3 h-3 ${checking ? 'animate-spin' : ''}`} />
+                  <RefreshCw className={`w-3 h-3 ${phase === 'checking' ? 'animate-spin' : ''}`} />
                   <span>Verificar</span>
                 </button>
               </div>
@@ -162,7 +260,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
               {/* Version Comparison Table */}
               <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 divide-y divide-neutral-800/80 text-xs">
                 <div className="py-2 flex items-center justify-between">
-                  <span className="text-neutral-400">Versão Local Instalada:</span>
+                  <span className="text-neutral-400">Versão Local:</span>
                   <span className="font-mono text-neutral-200">{status.currentVersion}</span>
                 </div>
 
@@ -180,12 +278,14 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
                   </span>
                 </div>
 
-                <div className="py-2 flex items-center justify-between">
-                  <span className="text-neutral-400">Última Checagem:</span>
-                  <span className="text-neutral-500 font-mono">
-                    {new Date(status.lastChecked).toLocaleTimeString()}
-                  </span>
-                </div>
+                {status.commitMessage && (
+                  <div className="py-2 flex items-start justify-between gap-2">
+                    <span className="text-neutral-400 shrink-0">Mensagem:</span>
+                    <span className="font-mono text-neutral-300 text-right truncate max-w-[320px]">
+                      {status.commitMessage}
+                    </span>
+                  </div>
+                )}
 
                 <div className="py-2 flex items-center justify-between">
                   <span className="text-neutral-400">Origem:</span>
@@ -201,45 +301,23 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
                 </div>
               </div>
 
-              {/* Update Result Banner (if updated) */}
-              {updateResult && (
-                <div
-                  className={`p-4 rounded-xl border text-xs ${
-                    updateResult.success
-                      ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300'
-                      : 'bg-rose-950/40 border-rose-800 text-rose-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 font-semibold mb-1">
-                    {updateResult.success ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    ) : (
-                      <AlertCircle className="w-4 h-4 text-rose-400" />
-                    )}
-                    <span>{updateResult.message}</span>
-                  </div>
-                  {updateResult.backupPath && (
-                    <div className="text-[11px] opacity-80 mt-1 font-mono">
-                      Backup salvo em: {updateResult.backupPath}
+              {/* Update Result Logs Banner */}
+              {updateResult && updateResult.logs && updateResult.logs.length > 0 && (
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setShowLogs(!showLogs)}
+                    className="text-[11px] text-neutral-400 hover:text-white underline"
+                  >
+                    {showLogs ? 'Ocultar detalhes da operação' : 'Ver detalhes da operação'}
+                  </button>
+
+                  {showLogs && (
+                    <div className="p-3 bg-neutral-950 border border-neutral-800 rounded-lg font-mono text-[11px] text-neutral-300 max-h-36 overflow-y-auto space-y-1">
+                      {updateResult.logs.map((log, i) => (
+                        <div key={i}>{log}</div>
+                      ))}
                     </div>
                   )}
-                  {updateResult.logs && updateResult.logs.length > 0 && (
-                    <button
-                      onClick={() => setShowLogs(!showLogs)}
-                      className="mt-2 text-[11px] underline hover:text-white"
-                    >
-                      {showLogs ? 'Ocultar logs de atualização' : 'Ver logs de atualização'}
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* Logs Drawer */}
-              {showLogs && updateResult?.logs && (
-                <div className="p-3 bg-neutral-950 border border-neutral-800 rounded-lg font-mono text-[11px] text-neutral-300 max-h-40 overflow-y-auto space-y-1">
-                  {updateResult.logs.map((log, i) => (
-                    <div key={i}>{log}</div>
-                  ))}
                 </div>
               )}
 
@@ -247,33 +325,34 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
               <div className="p-3.5 bg-neutral-950/60 border border-neutral-800/80 rounded-xl text-[11px] text-neutral-400 space-y-1.5">
                 <div className="flex items-center gap-1.5 text-neutral-300 font-semibold">
                   <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Atualização Segura com Rollback Automático:</span>
+                  <span>Segurança e Isolamento:</span>
                 </div>
-                <p>• Suas configurações e contas em <code className="text-neutral-200">~/.config/hubai/</code> são preservadas intactas.</p>
-                <p>• Um backup completo da versão anterior é gerado em <code className="text-neutral-200">~/.config/hubai/backups/</code>.</p>
-                <p>• Se a compilação falhar, o rollback é executado automaticamente sem interromper seu fluxo.</p>
+                <p>• Suas configurações em <code className="text-neutral-200">~/.config/hubai/</code> são preservadas intactas.</p>
+                <p>• O atualizador autônomo compila a nova versão em área isolada antes de aplicar qualquer alteração.</p>
+                <p>• Se houver falha de compilação ou rede, o rollback automático restaura a versão anterior sem intervenção manual.</p>
+                <p>• Nenhum dado, cookie ou perfil do Chrome é modificado ou exposto.</p>
               </div>
             </>
-          ) : null}
+          )}
         </div>
 
         {/* Footer */}
         <div className="px-6 py-4 border-t border-neutral-800 flex items-center justify-between bg-neutral-950">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-xs text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition-colors"
+            disabled={phase === 'updating' || phase === 'restarting'}
+            className="px-4 py-2 text-xs text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition-colors disabled:opacity-50"
           >
             Fechar
           </button>
 
-          {status?.hasUpdate && (
+          {status?.hasUpdate && phase !== 'updating' && phase !== 'restarting' && (
             <button
               onClick={handleApplyUpdate}
-              disabled={updating}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg shadow-lg shadow-indigo-950/50 transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg shadow-lg shadow-indigo-950/50 transition-colors"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${updating ? 'animate-spin' : ''}`} />
-              <span>{updating ? 'Instalando Atualização...' : 'Instalar Atualização com Backup'}</span>
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Atualizar Hub Agora</span>
             </button>
           )}
         </div>

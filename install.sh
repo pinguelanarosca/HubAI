@@ -55,7 +55,7 @@ mkdir -p "$DESKTOP_DIR"
 
 # 3. Obter Código-Fonte (Local ou do GitHub)
 echo "[3/6] Configurando arquivos da aplicação em $INSTALL_DIR..."
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ -f "$SCRIPT_DIR/package.json" ] && [ -f "$SCRIPT_DIR/server.ts" ]; then
   echo "Instalando a partir do diretório local: $SCRIPT_DIR"

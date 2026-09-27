@@ -210,91 +210,78 @@ export class UpdateService {
   }
 
   /**
-   * Applies update with automated backup and safe rollback.
+   * Applies update by delegating to the external autonomous updater script.
+   * This completely decouples update compilation/replacement from the running Node.js server.
    */
   public async applyUpdate(): Promise<UpdateApplyResult> {
     const logs: string[] = [];
     const previousCommit = this.getInstalledCommit();
-    logs.push(`[${new Date().toISOString()}] Iniciando atualização segura do HubAI...`);
+    logs.push(`[${new Date().toISOString()}] Iniciando delegação para o atualizador autônomo do HubAI...`);
     logs.push(`Commit instalado atual: ${previousCommit}`);
 
-    // 1. Create safety backup
-    let backupPath: string;
-    try {
-      backupPath = this.createBackup();
-      logs.push(`✓ Backup de segurança criado em: ${backupPath}`);
-    } catch (bErr: any) {
+    const userUpdater = path.join(os.homedir(), '.local', 'share', 'hubai-updater.sh');
+    const localUpdater = path.join(REPO_ROOT, 'scripts', 'hubai-updater.sh');
+    const fallbackUpdater = path.join(REPO_ROOT, 'scripts', 'update.sh');
+
+    let updaterScript: string;
+    if (fs.existsSync(userUpdater)) {
+      updaterScript = userUpdater;
+    } else if (fs.existsSync(localUpdater)) {
+      updaterScript = localUpdater;
+    } else if (fs.existsSync(fallbackUpdater)) {
+      updaterScript = fallbackUpdater;
+    } else {
       return {
         success: false,
-        message: 'Falha ao criar backup de segurança antes da atualização.',
-        error: bErr.message,
+        message: 'Script do atualizador externo não encontrado.',
+        error: `Não foi possível localizar o atualizador em: ${userUpdater} ou ${localUpdater}`,
         logs
       };
     }
 
-    // 2. Pull from git if git repository
-    let isGit = false;
     try {
-      execSync('git rev-parse --is-inside-work-tree 2>/dev/null', { cwd: REPO_ROOT });
-      isGit = true;
-    } catch {
-      isGit = false;
-    }
+      logs.push(`Disparando atualizador externo independente: ${updaterScript}`);
 
-    if (isGit) {
-      try {
-        logs.push('Obtendo alterações do repositório remoto git...');
-        execSync('git pull origin main --rebase 2>&1 || git pull origin master --rebase 2>&1', {
-          cwd: REPO_ROOT,
-          encoding: 'utf-8'
-        });
-        logs.push('✓ Alterações do Git obtidas com sucesso.');
-      } catch (gitErr: any) {
-        logs.push(`✗ Erro ao executar git pull: ${gitErr.message}. Executando rollback...`);
-        this.rollback(backupPath);
-        return {
-          success: false,
-          message: 'Falha ao baixar alterações do Git. A instalação anterior foi preservada.',
-          backupPath,
-          previousCommit,
-          logs,
-          error: gitErr.message
-        };
-      }
-    } else {
-      logs.push('Instalação local não gerenciada por Git. Verificando integridade dos arquivos...');
-    }
+      const userConfigDir = process.env.HUBAI_CONFIG_DIR || path.join(os.homedir(), '.config', 'hubai');
+      const child = spawn(
+        'bash',
+        [
+          updaterScript,
+          '--pid', String(process.pid),
+          '--target-dir', REPO_ROOT,
+          '--config-dir', userConfigDir
+        ],
+        {
+          detached: true,
+          stdio: 'ignore'
+        }
+      );
 
-    // 3. Install dependencies and build
-    try {
-      logs.push('Executando verificação de dependências e compilação de produção...');
-      execSync('npm run build', { cwd: REPO_ROOT, encoding: 'utf-8' });
-      logs.push('✓ Compilação de produção (vite build) concluída com sucesso.');
-    } catch (buildErr: any) {
-      logs.push(`✗ Falha na compilação da nova versão: ${buildErr.message}. Disparando rollback automático...`);
-      const rb = this.rollback(backupPath);
-      logs.push(rb.success ? '✓ Rollback automático concluído com sucesso.' : `✗ Falha no rollback: ${rb.error}`);
+      child.on('error', (err) => {
+        console.error('[UpdateService] Erro ao disparar processo do atualizador externo:', err);
+      });
+
+      child.unref();
+
+      logs.push(`✓ Atualizador autônomo iniciado com sucesso em segundo plano (PID: ${child.pid}).`);
+      logs.push('O processo atual será substituído e o servidor será reiniciado automaticamente após a compilação.');
+      logs.push(`Logs detalhados em tempo real: ${path.join(userConfigDir, 'logs', 'updater.log')}`);
+
+      return {
+        success: true,
+        message: 'Atualizador autônomo iniciado com sucesso. O HubAI será atualizado e reiniciado automaticamente.',
+        previousCommit,
+        logs
+      };
+    } catch (err: any) {
+      logs.push(`✗ Falha ao iniciar atualizador externo: ${err.message}`);
       return {
         success: false,
-        message: 'Falha na compilação da nova versão. A versão anterior foi restaurada automaticamente.',
-        backupPath,
-        previousCommit,
-        logs,
-        error: buildErr.message
+        message: 'Falha ao iniciar processo de atualização externa.',
+        error: err.message,
+        logs
       };
     }
-
-    const newCommit = this.getInstalledCommit();
-    logs.push(`✓ Atualização finalizada com sucesso! Novo commit: ${newCommit}`);
-
-    return {
-      success: true,
-      message: 'HubAI atualizado com sucesso!',
-      backupPath,
-      previousCommit,
-      newCommit,
-      logs
-    };
   }
 }
 

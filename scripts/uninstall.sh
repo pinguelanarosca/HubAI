@@ -1,37 +1,11 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# HubAI - Script de Desinstalação Limpa para Linux
+# HubAI - Desinstalador Oficial para Linux
+# Repositório Oficial: https://github.com/pinguelanarosca/HubAI
 # ==============================================================================
-set -e
-
-INSTALL_DIR="$HOME/.local/share/hubai"
-CONFIG_DIR="$HOME/.config/hubai"
-BIN_FILE="$HOME/.local/bin/hubai"
-DESKTOP_FILE="$HOME/.local/share/applications/hubai.desktop"
-
-echo "=========================================="
-echo "        DESINSTALADOR DO HUBAI            "
-echo "=========================================="
-
-PURGE=false
-if [ "$1" = "--purge" ]; then
-  PURGE=true
-fi
-
-echo "Removendo atalhos e executáveis..."
-rm -f "$BIN_FILE"
-rm -f "$DESKTOP_FILE"
-
-echo "Removendo diretório de instalação..."
-rm -rf "$INSTALL_DIR"
-
-if [ "$PURGE" = true ]; then
-  echo "Opção --purge detectada: removendo configurações em $CONFIG_DIR..."
-  rm -rf "$CONFIG_DIR"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ -f "$SCRIPT_DIR/uninstall.sh" ]; then
+  exec bash "$SCRIPT_DIR/uninstall.sh" "$@"
 else
-  echo "As configurações do usuário foram preservadas em: $CONFIG_DIR"
-  echo "(Use './uninstall.sh --purge' se desejar apagar também as configurações)."
+  exec bash "$HOME/.local/share/hubai/uninstall.sh" "$@"
 fi
-
-echo ""
-echo "✓ HubAI desinstalado com sucesso do seu usuário."
