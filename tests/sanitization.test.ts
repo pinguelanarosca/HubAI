@@ -369,8 +369,64 @@ async function runTests() {
     }
     console.log('✓ PASSOU: Descoberta e execução de todos os 8 navegadores Linux consistentes e validadas.');
 
+    // -------------------------------------------------------------------------
+    // TESTE 14: Fallback estrito apenas para descoberta / Launcher nunca troca silenciosamente
+    // -------------------------------------------------------------------------
+    console.log('[TESTE 14] Verificando que o launcher nunca troca silenciosamente o navegador configurado...');
+    const isolatedBinDir = path.join(testTempDir, 'isolated-alt-bin');
+    fs.mkdirSync(isolatedBinDir, { recursive: true });
+
+    // Criar apenas o binário alternativo 'google-chrome-stable' (sem 'google-chrome')
+    const altBinFile = path.join(isolatedBinDir, 'google-chrome-stable');
+    fs.writeFileSync(altBinFile, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+    const savedPath = process.env.PATH || '';
+    process.env.PATH = `${isolatedBinDir}:/usr/bin:/bin:/usr/local/bin`;
+
+    try {
+      // 1. A descoberta deve identificar o alternativo em detectedBinary
+      const variantsWithAlt = scanner.detectBrowserVariants();
+      const chromeVariant = variantsWithAlt.find(v => v.id === 'chrome-stable');
+      assert.ok(chromeVariant, 'Variante chrome-stable deve ser encontrada');
+      assert.strictEqual(chromeVariant?.binaryCommand, 'google-chrome', 'binaryCommand deve permanecer o canônico');
+      assert.strictEqual(chromeVariant?.detectedBinary, 'google-chrome-stable', 'detectedBinary deve apontar para o alternativo encontrado');
+
+      // 2. Se o usuário tiver 'google-chrome' configurado (que não existe no PATH isolado), o Launcher NÃO deve trocar silenciosamente para 'google-chrome-stable'
+      let failedAsExpected = false;
+      try {
+        launcher.validateBrowserExecutable('google-chrome');
+      } catch (err: any) {
+        failedAsExpected = true;
+        assert.ok(err.message.includes('não foi encontrado no PATH'));
+      }
+      assert.strictEqual(
+        failedAsExpected,
+        true,
+        'O launcher deve falhar explicitamente para "google-chrome" e NÃO executar "google-chrome-stable" silenciosamente!'
+      );
+
+      // 3. Se o usuário configurar explicitamente o alternativo 'google-chrome-stable', o launcher valida com sucesso
+      const validatedAlt = launcher.validateBrowserExecutable('google-chrome-stable');
+      assert.strictEqual(validatedAlt, altBinFile);
+
+      // 4. Parâmetros de perfil permanecem exatamente os configurados
+      const dryRunRes = launcher.buildCommand(
+        'google-chrome-stable',
+        testTempDir,
+        'Profile 1',
+        'https://gemini.google.com/app',
+        true
+      );
+      assert.strictEqual(dryRunRes.binary, 'google-chrome-stable');
+      assert.ok(dryRunRes.args.includes(`--user-data-dir=${testTempDir}`));
+      assert.ok(dryRunRes.args.includes('--profile-directory=Profile 1'));
+    } finally {
+      process.env.PATH = savedPath;
+    }
+    console.log('✓ PASSOU: Descoberta identifica binários alternativos e Launcher respeita estritamente o navegador configurado.');
+
     console.log('\n========================================================');
-    console.log('TODOS OS 13 TESTES DE SANEAMENTO PASSARAM COM SUCESSO!');
+    console.log('TODOS OS 14 TESTES DE SANEAMENTO PASSARAM COM SUCESSO!');
     console.log('========================================================\n');
   } finally {
     // Restaurar configuração padrão limpa no configManager

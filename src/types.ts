@@ -59,6 +59,8 @@ export interface BrowserVariant {
   id: string;
   userDataDir: string;
   binaryCommand: string;
+  detectedBinary?: string;
+  alternativeBinaries?: string[];
   exists: boolean;
   profileCount: number;
 }
