@@ -1,0 +1,6 @@
+{
+  "name": "AI Account Hub",
+  "description": "Centralized Linux desktop hub to organize and open multi-account AI platforms isolated strictly by Chrome sessions and profiles.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
