@@ -30,8 +30,7 @@ export class ProfileScanner {
       'chromium',
       'chromium-browser',
       'brave-browser',
-      'microsoft-edge',
-      'xdg-open'
+      'microsoft-edge'
     ];
     const available: string[] = [];
 

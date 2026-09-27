@@ -82,14 +82,14 @@ export class DiagnosticService {
           if (fs.existsSync(lockPath)) {
             singletonLockDetected = true;
             userDataStatus = 'passed';
-            userDataMessage = `Diretório real do Chrome validado: ${resolvedUserDataDir} (SingletonLock ativo: Chrome em execução)`;
-            userDataDetails = `Instância ativa do Chrome detectada. Comandos com --user-data-dir e --profile-directory direcionarão a nova janela para a sessão correta via IPC.`;
-            logs.push(`✓ Diretório verificado. SingletonLock ativo no Chrome.`);
+            userDataMessage = `Diretório base do Chrome validado: ${resolvedUserDataDir} (SingletonLock detectado)`;
+            userDataDetails = `Diretório base existente e legível. Arquivo SingletonLock presente (Chrome aparentemente em execução ou lock remanescente). Nota: a existência do lock não garante o direcionamento de janelas nem substitui a verificação individual de cada perfil.`;
+            logs.push(`✓ Diretório base verificado. SingletonLock detectado no sistema.`);
           } else {
             userDataStatus = 'passed';
-            userDataMessage = `Diretório real do Chrome validado: ${resolvedUserDataDir}`;
-            userDataDetails = `Acesso de leitura confirmado. Nenhuma trava de processo ativa detectada.`;
-            logs.push(`✓ Diretório do Chrome existente: ${resolvedUserDataDir}`);
+            userDataMessage = `Diretório base do Chrome validado: ${resolvedUserDataDir}`;
+            userDataDetails = `Diretório base existente e legível. Nenhum arquivo SingletonLock detectado (Chrome aparentemente fechado).`;
+            logs.push(`✓ Diretório base verificado. Sem locks de processo ativos.`);
           }
         }
       } catch (err: any) {
@@ -139,11 +139,11 @@ export class DiagnosticService {
 
             if (hasPrefs) {
               accStatus = 'passed';
-              accMsg = `Perfil real autenticado e validado (${account.chromeProfileDir})${lockInProfile ? ' [LOCK ativo]' : ''}`;
+              accMsg = `Perfil real localizado e legível (${account.chromeProfileDir}) com arquivo Preferences verificado${lockInProfile ? ' [LOCK local ativo]' : ''}`;
               logs.push(`✓ [${account.name}] Perfil real verificado em ${profilePath}.`);
             } else {
               accStatus = 'warning';
-              accMsg = `Pasta existe, mas arquivo Preferences do Chrome ainda não foi gerado. Inicie este perfil no Chrome para concluir o registro.`;
+              accMsg = `Pasta do perfil existe, mas arquivo Preferences do Chrome ainda não foi gerado. Inicie este perfil no Chrome para concluir o registro.`;
               logs.push(`⚠ [${account.name}] Pasta "${account.chromeProfileDir}" encontrada sem arquivo Preferences.`);
             }
           }

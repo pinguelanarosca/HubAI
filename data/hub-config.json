@@ -2,7 +2,7 @@
   "version": 1,
   "system": {
     "browserCommand": "google-chrome",
-    "chromeUserDataDir": "~/.config/google-chrome",
+    "chromeUserDataDir": "/root/.config/google-chrome",
     "openInNewWindow": true,
     "additionalFlags": [
       "--no-first-run"
@@ -110,7 +110,7 @@
   "accounts": [
     {
       "id": "acc_1",
-      "name": "Conta 1 (Personalizada)",
+      "name": "Conta 1 (Principal)",
       "email": "",
       "chromeProfileDir": "Default",
       "color": "#3b82f6",

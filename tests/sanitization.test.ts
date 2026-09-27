@@ -2,7 +2,7 @@ import assert from 'assert';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { ConfigManager } from '../server/configManager.js';
+import { configManager, ConfigManager } from '../server/configManager.js';
 import { LauncherService } from '../server/launcherService.js';
 import { ProfileScanner } from '../server/profileScanner.js';
 import { DiagnosticService } from '../server/diagnosticService.js';
@@ -117,7 +117,7 @@ async function runTests() {
     // TESTE 6: Configuração inválida não é mascarada
     // -------------------------------------------------------------------------
     console.log('[TESTE 6] Verificando rejeição de configurações inválidas...');
-    const testConfigManager = new ConfigManager();
+    const testConfigManager = configManager;
 
     // 6a: Colisão de perfis (duas contas apontando para o mesmo perfil)
     const invalidDuplicateProfileConfig: any = {
@@ -178,17 +178,158 @@ async function runTests() {
     const saveResult = testConfigManager.saveConfig(validModifiedConfig);
     assert.strictEqual(saveResult.success, true);
 
-    // Simular reinicialização instanciando novo ConfigManager
     const freshManager = new ConfigManager();
     const reloaded = freshManager.getConfig();
     const acc1 = reloaded.accounts.find(a => a.id === 'acc_1');
     assert.strictEqual(acc1?.name, updatedName);
     console.log('✓ PASSOU: Reinicialização preserva exatamente a configuração salva.');
 
-    console.log('\n======================================================');
-    console.log('TODOS OS 7 TESTES DE SANEAMENTO PASSARAM COM SUCESSO!');
-    console.log('======================================================\n');
+    // -------------------------------------------------------------------------
+    // TESTE 8: xdg-open NÃO é considerado navegador no profileScanner
+    // -------------------------------------------------------------------------
+    console.log('[TESTE 8] Verificando que xdg-open não é considerado navegador compatível...');
+    const detectedBinaries = scanner.detectBrowserBinaries();
+    assert.strictEqual(
+      detectedBinaries.includes('xdg-open'),
+      false,
+      'FALHA: xdg-open não deve ser considerado um navegador compatível com perfis!'
+    );
+    console.log('✓ PASSOU: xdg-open excluído do detector de navegadores compatíveis.');
+
+    // -------------------------------------------------------------------------
+    // TESTE 9: Launcher rejeita executável inexistente com erro real
+    // -------------------------------------------------------------------------
+    console.log('[TESTE 9] Verificando que executável de navegador inexistente gera erro real...');
+    let binErrorThrew = false;
+    try {
+      launcher.validateBrowserExecutable('navegador-que-nao-existe-no-sistema-12345');
+    } catch (err: any) {
+      binErrorThrew = true;
+      assert.ok(err.message.includes('não foi encontrado no PATH'));
+    }
+    assert.strictEqual(binErrorThrew, true, 'O launcher deve falhar quando o executável do navegador não existe no PATH!');
+
+    // Testar com caminho absoluto inexistente
+    let pathErrorThrew = false;
+    try {
+      launcher.validateBrowserExecutable('/usr/bin/navegador_fake_abs_999');
+    } catch (err: any) {
+      pathErrorThrew = true;
+      assert.ok(err.message.includes('não foi encontrado em:'));
+    }
+    assert.strictEqual(pathErrorThrew, true, 'O launcher deve falhar com caminho absoluto inexistente!');
+    console.log('✓ PASSOU: Launcher retorna erro real quando o executável configurado não existe.');
+
+    // -------------------------------------------------------------------------
+    // TESTE 10: Paridade absoluta entre dry-run e comando de execução
+    // -------------------------------------------------------------------------
+    console.log('[TESTE 10] Verificando paridade exata de comando entre dry-run e execução...');
+    // Criar um script executável mock no testTempDir para testar o launcher
+    const mockBrowserPath = path.join(testTempDir, 'mock-browser.sh');
+    fs.writeFileSync(mockBrowserPath, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+    const testConfigWithMock: HubConfig = {
+      version: 1,
+      system: {
+        browserCommand: mockBrowserPath,
+        chromeUserDataDir: testTempDir,
+        openInNewWindow: true,
+        additionalFlags: ['--no-first-run'],
+        theme: 'dark'
+      },
+      providers: [
+        {
+          id: 'test_gemini',
+          name: 'Gemini',
+          shortName: 'Gemini',
+          defaultUrl: 'https://gemini.google.com/app',
+          category: 'general',
+          icon: 'Sparkles',
+          description: 'Test',
+          enabled: true,
+          order: 1
+        }
+      ],
+      accounts: [
+        {
+          id: 'test_acc_1',
+          name: 'Conta 1 Real',
+          email: '',
+          chromeProfileDir: 'Profile 1',
+          color: '#3b82f6',
+          avatarIcon: 'Shield',
+          order: 1
+        }
+      ]
+    };
+
+    testConfigManager.saveConfig(testConfigWithMock);
+
+    // Executar em modo dry-run
+    const dryRunResult = await launcher.launch({
+      accountId: 'test_acc_1',
+      providerId: 'test_gemini',
+      dryRun: true
+    });
+
+    // Executar em modo real (em ambiente sem DISPLAY gerará command_generated)
+    const liveResult = await launcher.launch({
+      accountId: 'test_acc_1',
+      providerId: 'test_gemini',
+      dryRun: false
+    });
+
+    assert.strictEqual(
+      dryRunResult.command,
+      liveResult.command,
+      'FALHA: O comando do dry-run deve ser idêntico ao comando gerado para execução!'
+    );
+    assert.strictEqual(
+      dryRunResult.command.includes(`--user-data-dir="${testTempDir}"`),
+      true
+    );
+    assert.strictEqual(
+      dryRunResult.command.includes('--profile-directory="Profile 1"'),
+      true
+    );
+    console.log('✓ PASSOU: O comando validado pelo dry-run é rigorosamente idêntico ao de execução.');
+
+    // -------------------------------------------------------------------------
+    // TESTE 11: generateDesktopShortcuts só gera para perfis existentes e usa buildCommand
+    // -------------------------------------------------------------------------
+    console.log('[TESTE 11] Verificando generateDesktopShortcuts()...');
+    const shortcuts = launcher.generateDesktopShortcuts();
+    // Somente 'Profile 1' existe em testTempDir
+    assert.strictEqual(shortcuts.length, 1);
+    assert.ok(shortcuts[0].content.includes(`--profile-directory="Profile 1"`));
+    assert.ok(shortcuts[0].content.includes(`--user-data-dir="${testTempDir}"`));
+    console.log('✓ PASSOU: generateDesktopShortcuts valida existência real e usa a mesma lógica do launcher.');
+
+    // -------------------------------------------------------------------------
+    // TESTE 12: Diagnóstico não faz alegações de IPC no SingletonLock
+    // -------------------------------------------------------------------------
+    console.log('[TESTE 12] Verificando diagnóstico e tratamento objetivo de SingletonLock...');
+    // Criar SingletonLock temporário
+    fs.writeFileSync(path.join(testTempDir, 'SingletonLock'), 'test-lock');
+    const diagService = new DiagnosticService();
+    const report = await diagService.runFullDiagnostic();
+
+    // Validar que nenhuma mensagem afirma entrega via IPC
+    const reportStr = JSON.stringify(report);
+    assert.strictEqual(
+      reportStr.includes('via IPC'),
+      false,
+      'FALHA: O relatório de diagnóstico não deve fazer afirmações não comprovadas de envio via IPC!'
+    );
+    console.log('✓ PASSOU: Diagnóstico distingue diretório, perfis e lock sem afirmações especulativas.');
+
+    console.log('\n========================================================');
+    console.log('TODOS OS 12 TESTES DE SANEAMENTO PASSARAM COM SUCESSO!');
+    console.log('========================================================\n');
   } finally {
+    // Restaurar configuração padrão limpa no configManager
+    configManager.resetToDefaults();
+
     // Limpar diretório temporário de testes
     try {
       fs.rmSync(testTempDir, { recursive: true, force: true });
