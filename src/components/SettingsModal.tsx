@@ -23,6 +23,8 @@ import {
   Archive,
   Download,
   Check,
+  Copy,
+  Terminal,
   X
 } from '../utils/icons.js';
 import {
@@ -40,7 +42,10 @@ import {
   resetHubConfig,
   syncChromeAccounts,
   importMatchedProfiles,
-  fetchBrowserVariants
+  fetchBrowserVariants,
+  fetchUninstallInfo,
+  requestSystemUninstall,
+  UninstallInfo
 } from '../services/api.js';
 
 interface SettingsModalProps {
@@ -54,7 +59,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   onConfigSaved
 }) => {
-  const [activeTab, setActiveTab] = useState<'accounts' | 'providers' | 'system'>('accounts');
+  const [activeTab, setActiveTab] = useState<'accounts' | 'providers' | 'system' | 'uninstall'>('accounts');
   const [localConfig, setLocalConfig] = useState<HubConfig>(JSON.parse(JSON.stringify(config)));
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -67,11 +72,45 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [browserVariants, setBrowserVariants] = useState<BrowserVariant[]>([]);
   const [showImportPreview, setShowImportPreview] = useState(false);
 
+  // Uninstall state
+  const [uninstallInfo, setUninstallInfo] = useState<UninstallInfo | null>(null);
+  const [uninstalling, setUninstalling] = useState(false);
+  const [uninstallResult, setUninstallResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
+
   useEffect(() => {
     fetchBrowserVariants()
       .then(setBrowserVariants)
       .catch((err) => console.warn('Erro ao carregar variantes de navegadores:', err));
+
+    fetchUninstallInfo()
+      .then(setUninstallInfo)
+      .catch((err) => console.warn('Erro ao carregar informações de desinstalação:', err));
   }, []);
+
+  const handleCopy = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedCmd(id);
+    setTimeout(() => setCopiedCmd(null), 2000);
+  };
+
+  const handleTriggerUninstall = async (purge: boolean) => {
+    const confirmMsg = purge
+      ? 'ATENÇÃO: Isso irá encerrar o HubAI e apagar COMPLETAMENTE todos os arquivos, executáveis, logs, atalhos e configurações (~/.config/hubai) do seu computador.\n\nDeseja prosseguir com a LIMPEZA TOTAL?'
+      : 'Isso irá desinstalar o aplicativo HubAI, mantendo suas contas salvas em ~/.config/hubai para reinstalações futuras.\n\nDeseja prosseguir com a desinstalação?';
+
+    if (!window.confirm(confirmMsg)) return;
+
+    setUninstalling(true);
+    try {
+      const res = await requestSystemUninstall(purge);
+      setUninstallResult({ success: true, message: res.message });
+    } catch (err: any) {
+      setUninstallResult({ success: false, message: err.message || 'Erro ao solicitar desinstalação.' });
+    } finally {
+      setUninstalling(false);
+    }
+  };
 
   const handleSyncChromeAccounts = async (targetDir?: string) => {
     setSyncing(true);
@@ -341,6 +380,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }`}
           >
             Sistema Linux & Caminhos
+          </button>
+          <button
+            onClick={() => setActiveTab('uninstall')}
+            className={`py-3 px-3 text-xs font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
+              activeTab === 'uninstall'
+                ? 'border-rose-500 text-rose-400'
+                : 'border-transparent text-neutral-400 hover:text-rose-300'
+            }`}
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+            <span>Desinstalação & Limpeza</span>
           </button>
         </div>
 
@@ -839,6 +889,234 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     Restaurar Padrões
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 4: UNINSTALL & COMPLETE CLEANUP */}
+          {activeTab === 'uninstall' && (
+            <div className="space-y-5">
+              <div>
+                <h3 className="text-xs font-semibold text-rose-300 flex items-center gap-1.5">
+                  <Trash2 className="w-4 h-4 text-rose-400" />
+                  <span>Desinstalador & Limpeza Completa do Linux</span>
+                </h3>
+                <p className="text-xs text-neutral-400 mt-0.5">
+                  Remova o HubAI do seu sistema operacional com controle granular sobre dados e configurações.
+                </p>
+              </div>
+
+              {uninstallResult && (
+                <div
+                  className={`p-4 rounded-xl border text-xs flex items-start gap-2.5 ${
+                    uninstallResult.success
+                      ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
+                      : 'bg-rose-950/60 border-rose-800 text-rose-300'
+                  }`}
+                >
+                  {uninstallResult.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  )}
+                  <div>
+                    <span className="font-semibold block mb-0.5">
+                      {uninstallResult.success ? 'Desinstalação Disparada' : 'Falha na Operação'}
+                    </span>
+                    <span>{uninstallResult.message}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Installed Components Breakdown */}
+              <div className="p-4 bg-neutral-950 border border-neutral-800 rounded-xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-neutral-200">
+                    Componentes e Arquivos Instalados no PC
+                  </span>
+                  <span className="text-[10px] text-neutral-500 font-mono">Espaço do Usuário</span>
+                </div>
+
+                <div className="space-y-2 text-xs">
+                  <div className="flex items-center justify-between p-2 bg-neutral-900/80 rounded-lg border border-neutral-800/80">
+                    <span className="text-neutral-400">Comando Executável:</span>
+                    <code className="text-neutral-300 font-mono text-[11px]">~/.local/bin/hubai</code>
+                  </div>
+                  <div className="flex items-center justify-between p-2 bg-neutral-900/80 rounded-lg border border-neutral-800/80">
+                    <span className="text-neutral-400">Atalhos no Menu Linux:</span>
+                    <code className="text-neutral-300 font-mono text-[11px]">~/.local/share/applications/hubai*.desktop</code>
+                  </div>
+                  <div className="flex items-center justify-between p-2 bg-neutral-900/80 rounded-lg border border-neutral-800/80">
+                    <span className="text-neutral-400">Aplicação e Dependências:</span>
+                    <code className="text-neutral-300 font-mono text-[11px]">~/.local/share/hubai</code>
+                  </div>
+                  <div className="flex items-center justify-between p-2 bg-neutral-900/80 rounded-lg border border-neutral-800/80">
+                    <span className="text-neutral-400">Atualizador Autônomo:</span>
+                    <code className="text-neutral-300 font-mono text-[11px]">~/.local/share/hubai-updater.sh</code>
+                  </div>
+                  <div className="flex items-center justify-between p-2 bg-neutral-900/80 rounded-lg border border-neutral-800/80">
+                    <span className="text-neutral-400">Configurações, Logs e Backups:</span>
+                    <code className="text-neutral-300 font-mono text-[11px]">~/.config/hubai</code>
+                  </div>
+                </div>
+              </div>
+
+              {/* Uninstaller Modes Comparison */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Mode 1: Standard */}
+                <div className="p-4 bg-neutral-950 border border-neutral-800 rounded-xl flex flex-col justify-between space-y-3">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Archive className="w-4 h-4 text-neutral-400" />
+                      <span className="text-xs font-semibold text-neutral-200">
+                        1. Desinstalação Padrão
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-neutral-400 leading-relaxed">
+                      Remove o executável <code className="text-neutral-300">hubai</code>, atalhos do sistema e arquivos da aplicação, mas <strong>preserva suas contas e perfis</strong> em <code className="text-neutral-300">~/.config/hubai</code> caso você decida reinstalar no futuro.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-neutral-800/80">
+                    <div className="flex items-center justify-between gap-2 p-1.5 bg-neutral-900 rounded border border-neutral-800">
+                      <code className="text-[11px] font-mono text-neutral-300 truncate">
+                        hubai uninstall
+                      </code>
+                      <button
+                        onClick={() => handleCopy('hubai uninstall', 'cmd_std')}
+                        className="p-1 text-neutral-400 hover:text-white transition-colors"
+                        title="Copiar comando"
+                      >
+                        {copiedCmd === 'cmd_std' ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={() => handleTriggerUninstall(false)}
+                      disabled={uninstalling}
+                      className="w-full py-2 px-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 font-medium text-xs rounded-lg border border-neutral-700 transition-colors disabled:opacity-50"
+                    >
+                      {uninstalling ? 'Processando...' : 'Desinstalar (Preservar Contas)'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Mode 2: Purge Total */}
+                <div className="p-4 bg-neutral-950 border border-rose-900/40 rounded-xl flex flex-col justify-between space-y-3">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Trash2 className="w-4 h-4 text-rose-400" />
+                      <span className="text-xs font-semibold text-rose-300">
+                        2. Limpeza Total (Purge)
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-rose-300/80 leading-relaxed">
+                      Apaga <strong>100% dos arquivos</strong> do projeto do seu computador: executáveis, atalhos, instaladores, logs, backups e configurações salvas em <code className="text-rose-200">~/.config/hubai</code>.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-rose-900/30">
+                    <div className="flex items-center justify-between gap-2 p-1.5 bg-neutral-900 rounded border border-rose-900/40">
+                      <code className="text-[11px] font-mono text-rose-300 truncate">
+                        hubai uninstall --purge
+                      </code>
+                      <button
+                        onClick={() => handleCopy('hubai uninstall --purge', 'cmd_purge')}
+                        className="p-1 text-rose-400 hover:text-white transition-colors"
+                        title="Copiar comando"
+                      >
+                        {copiedCmd === 'cmd_purge' ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={() => handleTriggerUninstall(true)}
+                      disabled={uninstalling}
+                      className="w-full py-2 px-3 bg-rose-600/90 hover:bg-rose-500 text-white font-medium text-xs rounded-lg transition-colors shadow-sm disabled:opacity-50"
+                    >
+                      {uninstalling ? 'Limpando...' : 'Limpar Completamente o PC'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Terminal One-Liners */}
+              <div className="p-4 bg-neutral-950 border border-neutral-800 rounded-xl space-y-3">
+                <div className="flex items-center gap-2">
+                  <Terminal className="w-4 h-4 text-neutral-400" />
+                  <span className="text-xs font-semibold text-neutral-300">
+                    Comandos Rápidos no Terminal Linux
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2 p-2 bg-neutral-900 rounded-lg border border-neutral-800">
+                    <div className="truncate">
+                      <span className="text-[10px] text-neutral-500 block">Via script local de desinstalação:</span>
+                      <code className="text-xs font-mono text-neutral-200">bash ~/.local/share/hubai/uninstall.sh --purge</code>
+                    </div>
+                    <button
+                      onClick={() => handleCopy('bash ~/.local/share/hubai/uninstall.sh --purge', 'cmd_script')}
+                      className="px-2.5 py-1 text-xs bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded border border-neutral-700 transition-colors flex items-center gap-1 shrink-0"
+                    >
+                      {copiedCmd === 'cmd_script' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="text-emerald-400 text-[11px]">Copiado</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span className="text-[11px]">Copiar</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 p-2 bg-neutral-900 rounded-lg border border-neutral-800">
+                    <div className="truncate">
+                      <span className="text-[10px] text-neutral-500 block">Comando de 1 linha direto do GitHub:</span>
+                      <code className="text-xs font-mono text-neutral-200">curl -sSL https://raw.githubusercontent.com/pinguelanarosca/HubAI/main/uninstall.sh | bash -s -- --purge</code>
+                    </div>
+                    <button
+                      onClick={() =>
+                        handleCopy(
+                          'curl -sSL https://raw.githubusercontent.com/pinguelanarosca/HubAI/main/uninstall.sh | bash -s -- --purge',
+                          'cmd_curl'
+                        )
+                      }
+                      className="px-2.5 py-1 text-xs bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded border border-neutral-700 transition-colors flex items-center gap-1 shrink-0"
+                    >
+                      {copiedCmd === 'cmd_curl' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="text-emerald-400 text-[11px]">Copiado</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span className="text-[11px]">Copiar</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Safety Note */}
+              <div className="p-3 bg-neutral-900/50 border border-neutral-800/80 rounded-lg text-xs text-neutral-400 flex items-start gap-2">
+                <Shield className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <span>
+                  <strong>Garantia de Segurança dos Navegadores:</strong> Os perfis reais instalados nos seus navegadores (<code className="text-neutral-300 font-mono">~/.config/google-chrome</code>, <code className="text-neutral-300 font-mono">~/.config/chromium</code>, etc.) <strong>nunca são excluídos ou modificados</strong> em nenhum momento durante o processo de desinstalação.
+                </span>
               </div>
             </div>
           )}

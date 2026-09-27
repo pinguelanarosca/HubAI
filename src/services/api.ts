@@ -151,3 +151,52 @@ export async function exportDesktopShortcuts(): Promise<{
   }
   return await res.json();
 }
+
+export interface UninstallInfo {
+  paths: {
+    binary: string;
+    installDir: string;
+    updater: string;
+    desktopFile: string;
+    configDir: string;
+    configFile: string;
+    logsDir: string;
+    backupsDir: string;
+  };
+  commands: {
+    standard: string;
+    purge: string;
+    cliPurge: string;
+    curlPurge: string;
+  };
+}
+
+export async function fetchUninstallInfo(): Promise<UninstallInfo> {
+  const res = await fetch('/api/system/uninstall-info');
+  if (!res.ok) {
+    throw new Error('Falha ao obter informações do desinstalador');
+  }
+  const data = await res.json();
+  return {
+    paths: data.paths,
+    commands: data.commands
+  };
+}
+
+export async function requestSystemUninstall(purge: boolean = false): Promise<{
+  success: boolean;
+  message: string;
+  purge: boolean;
+}> {
+  const res = await fetch('/api/system/uninstall', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ purge })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Falha ao acionar desinstalação');
+  }
+  return data;
+}
+

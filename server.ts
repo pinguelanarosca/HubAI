@@ -2,6 +2,7 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
+import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { configManager } from './server/configManager.js';
 import { profileScanner } from './server/profileScanner.js';
@@ -213,6 +214,61 @@ async function startServer() {
         errors: errors.length > 0 ? errors : undefined,
         shortcutsPreview: shortcuts.slice(0, 3)
       });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 7. System Uninstaller Endpoints
+  app.get('/api/system/uninstall-info', (req, res) => {
+    try {
+      const home = process.env.HOME || '';
+      res.json({
+        success: true,
+        paths: {
+          binary: path.join(home, '.local/bin/hubai'),
+          installDir: path.join(home, '.local/share/hubai'),
+          updater: path.join(home, '.local/share/hubai-updater.sh'),
+          desktopFile: path.join(home, '.local/share/applications/hubai.desktop'),
+          configDir: configManager.getConfigDir(),
+          configFile: configManager.getConfigFile(),
+          logsDir: path.join(configManager.getConfigDir(), 'logs'),
+          backupsDir: path.join(configManager.getConfigDir(), 'backups')
+        },
+        commands: {
+          standard: 'bash ~/.local/share/hubai/uninstall.sh',
+          purge: 'bash ~/.local/share/hubai/uninstall.sh --purge',
+          cliPurge: 'hubai uninstall --purge',
+          curlPurge: 'curl -sSL https://raw.githubusercontent.com/pinguelanarosca/HubAI/main/uninstall.sh | bash -s -- --purge'
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/system/uninstall', (req, res) => {
+    try {
+      const purge = req.body?.purge === true;
+      const uninstallerPath = path.join(process.env.HOME || '', '.local/share/hubai/uninstall.sh');
+      const scriptToRun = fs.existsSync(uninstallerPath) ? uninstallerPath : path.join(__dirname, 'uninstall.sh');
+
+      res.json({
+        success: true,
+        message: purge
+          ? 'Desinstalação completa e limpeza total de dados iniciada.'
+          : 'Desinstalação da aplicação iniciada. Configurações mantidas.',
+        purge
+      });
+
+      setTimeout(() => {
+        try {
+          const args = purge ? ['--purge'] : [];
+          spawn('bash', [scriptToRun, ...args], { detached: true, stdio: 'ignore' }).unref();
+        } catch (e) {
+          console.error('[HubAI] Erro ao disparar script de desinstalação:', e);
+        }
+      }, 800);
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }

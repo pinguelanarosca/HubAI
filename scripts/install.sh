@@ -111,14 +111,35 @@ LOG_DIR="$HUBAI_CONFIG_DIR/logs"
 LOG_FILE="$LOG_DIR/hubai.log"
 PID_FILE="$HUBAI_CONFIG_DIR/hubai.pid"
 
+ACTION="start"
 PORT="${PORT:-${HUBAI_PORT:-3000}}"
+UNINSTALL_ARGS=()
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --port|-p)
       PORT="$2"
       shift 2
       ;;
+    --stop|stop)
+      ACTION="stop"
+      shift
+      ;;
+    --restart|restart)
+      ACTION="restart"
+      shift
+      ;;
+    --uninstall|uninstall)
+      ACTION="uninstall"
+      shift
+      ;;
+    --purge|purge|--clean|clean|--all|-a)
+      ACTION="uninstall"
+      UNINSTALL_ARGS+=("--purge")
+      shift
+      ;;
     *)
+      UNINSTALL_ARGS+=("$1")
       shift
       ;;
   esac
@@ -127,25 +148,69 @@ export PORT="$PORT"
 
 mkdir -p "$LOG_DIR"
 
+if [ "$ACTION" = "uninstall" ]; then
+  if [ -f "$INSTALL_DIR/uninstall.sh" ]; then
+    exec bash "$INSTALL_DIR/uninstall.sh" "${UNINSTALL_ARGS[@]}"
+  else
+    echo "Executando desinstalação direta..."
+    killall hubai 2>/dev/null || true
+    pkill -f "$INSTALL_DIR" 2>/dev/null || true
+    rm -f "$HOME/.local/bin/hubai" "$HOME/.local/share/hubai-updater.sh" "$HOME/.local/share/applications/hubai"*.desktop
+    rm -rf "$INSTALL_DIR"
+    if [[ " ${UNINSTALL_ARGS[*]} " =~ " --purge " ]]; then
+      rm -rf "$HUBAI_CONFIG_DIR"
+      echo "✓ HubAI e configurações completamente removidos do sistema."
+    else
+      echo "✓ HubAI desinstalado. Configurações mantidas em $HUBAI_CONFIG_DIR"
+    fi
+    exit 0
+  fi
+fi
+
+if [ "$ACTION" = "stop" ]; then
+  if [ -f "$PID_FILE" ]; then
+    EXISTING_PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
+    if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
+      kill "$EXISTING_PID" 2>/dev/null || true
+      rm -f "$PID_FILE"
+      echo "✓ HubAI (PID: $EXISTING_PID) finalizado com sucesso."
+    else
+      rm -f "$PID_FILE"
+      echo "HubAI não estava em execução."
+    fi
+  else
+    echo "HubAI não estava em execução."
+  fi
+  # Garantir término de qualquer processo filho restante do HubAI
+  pkill -f "$INSTALL_DIR" 2>/dev/null || true
+  exit 0
+fi
+
+if [ "$ACTION" = "restart" ] || [ -f "$PID_FILE" ]; then
+  EXISTING_PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
+  if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
+    if [ "$ACTION" = "restart" ]; then
+      kill "$EXISTING_PID" 2>/dev/null || true
+      rm -f "$PID_FILE"
+      sleep 1
+    else
+      echo "HubAI já está em execução (PID: $EXISTING_PID)."
+      echo "Para trocar de porta ou reiniciar, execute: hubai --restart --port $PORT"
+      echo "Ou acesse no navegador: http://localhost:$PORT"
+      if command -v xdg-open &>/dev/null && [ -n "$DISPLAY$WAYLAND_DISPLAY" ]; then
+        xdg-open "http://localhost:$PORT" &>/dev/null || true
+      fi
+      exit 0
+    fi
+  else
+    rm -f "$PID_FILE"
+  fi
+fi
+
 if [ ! -d "$INSTALL_DIR" ]; then
   echo "ERRO: Instalação do HubAI não encontrada em $INSTALL_DIR."
   echo "Execute o instalador: bash install.sh"
   exit 1
-fi
-
-# Prevenção de Múltiplas Instâncias
-if [ -f "$PID_FILE" ]; then
-  EXISTING_PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
-  if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
-    echo "HubAI já está em execução (PID: $EXISTING_PID)."
-    echo "Acesse no navegador: http://localhost:$PORT"
-    if command -v xdg-open &>/dev/null && [ -n "$DISPLAY$WAYLAND_DISPLAY" ]; then
-      xdg-open "http://localhost:$PORT" &>/dev/null || true
-    fi
-    exit 0
-  else
-    rm -f "$PID_FILE"
-  fi
 fi
 
 cd "$INSTALL_DIR"
