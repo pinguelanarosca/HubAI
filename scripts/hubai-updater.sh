@@ -128,7 +128,7 @@ log "[3/6] Instalando dependências e compilando nova versão no staging..."
 cd "$STAGING_DIR"
 
 BUILD_SUCCESS=false
-if npm install >> "$LOG_FILE" 2>&1 && npm run build >> "$LOG_FILE" 2>&1; then
+if (npm install --legacy-peer-deps || npm install) >> "$LOG_FILE" 2>&1 && npm run build >> "$LOG_FILE" 2>&1; then
   BUILD_SUCCESS=true
   log "✓ Compilação no diretório temporário finalizada com sucesso."
 else

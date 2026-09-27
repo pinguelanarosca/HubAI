@@ -87,7 +87,7 @@ fi
 # 4. Instalar Dependências e Compilar
 echo "[4/6] Instalando dependências e compilando aplicação..."
 cd "$INSTALL_DIR"
-npm install
+npm install --legacy-peer-deps || npm install
 npm run build
 
 # 5. Instalar Atualizador Externo Autônomo (~/.local/share/hubai-updater.sh)
