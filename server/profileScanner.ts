@@ -43,10 +43,16 @@ export class ProfileScanner {
     const candidates = [
       'google-chrome',
       'google-chrome-stable',
+      'google-chrome-beta',
+      'google-chrome-unstable',
       'chromium',
       'chromium-browser',
       'brave-browser',
-      'microsoft-edge'
+      'brave',
+      'microsoft-edge',
+      'microsoft-edge-stable',
+      'microsoft-edge-beta',
+      'microsoft-edge-dev'
     ];
     const available: string[] = [];
 
@@ -69,12 +75,13 @@ export class ProfileScanner {
    */
   public detectBrowserVariants(): BrowserVariant[] {
     const home = os.homedir();
-    const candidates: { id: string; name: string; dir: string; binary: string }[] = [
+    const candidates: { id: string; name: string; dir: string; binary: string; fallbackBinaries?: string[] }[] = [
       {
         id: 'chrome-stable',
         name: 'Google Chrome',
         dir: path.join(home, '.config', 'google-chrome'),
-        binary: 'google-chrome'
+        binary: 'google-chrome',
+        fallbackBinaries: ['google-chrome-stable']
       },
       {
         id: 'chrome-beta',
@@ -92,15 +99,26 @@ export class ProfileScanner {
         id: 'chromium',
         name: 'Chromium',
         dir: path.join(home, '.config', 'chromium'),
-        binary: 'chromium'
+        binary: 'chromium',
+        fallbackBinaries: ['chromium-browser']
       },
       {
         id: 'brave',
         name: 'Brave Browser',
         dir: path.join(home, '.config', 'BraveSoftware', 'Brave-Browser'),
-        binary: 'brave-browser'
+        binary: 'brave-browser',
+        fallbackBinaries: ['brave']
+      },
+      {
+        id: 'edge',
+        name: 'Microsoft Edge',
+        dir: path.join(home, '.config', 'microsoft-edge'),
+        binary: 'microsoft-edge',
+        fallbackBinaries: ['microsoft-edge-stable', 'microsoft-edge-beta', 'microsoft-edge-dev']
       }
     ];
+
+    const availableBins = new Set(this.detectBrowserBinaries());
 
     return candidates.map(c => {
       const exists = fs.existsSync(c.dir);
@@ -116,11 +134,20 @@ export class ProfileScanner {
         }
       }
 
+      // Choose a binary that is actually found on PATH if available, otherwise default binary
+      let selectedBinary = c.binary;
+      if (!availableBins.has(selectedBinary) && c.fallbackBinaries) {
+        const found = c.fallbackBinaries.find(b => availableBins.has(b));
+        if (found) {
+          selectedBinary = found;
+        }
+      }
+
       return {
         id: c.id,
         name: c.name,
         userDataDir: c.dir,
-        binaryCommand: c.binary,
+        binaryCommand: selectedBinary,
         exists,
         profileCount
       };

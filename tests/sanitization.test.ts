@@ -323,8 +323,54 @@ async function runTests() {
     );
     console.log('✓ PASSOU: Diagnóstico distingue diretório, perfis e lock sem afirmações especulativas.');
 
+    // -------------------------------------------------------------------------
+    // TESTE 13: Consistência entre descoberta e execução dos navegadores
+    // -------------------------------------------------------------------------
+    console.log('[TESTE 13] Verificando consistência entre descoberta e execução dos navegadores...');
+    const variants = scanner.detectBrowserVariants();
+    const expectedBrowserIds = ['chrome-stable', 'chrome-beta', 'chrome-unstable', 'chromium', 'brave', 'edge'];
+    for (const expectedId of expectedBrowserIds) {
+      assert.ok(variants.some(v => v.id === expectedId), `Variante de navegador "${expectedId}" deve estar presente em detectBrowserVariants()`);
+    }
+
+    // Criar executáveis mock no diretório de teste para testar correspondência
+    const mockBinDir = path.join(testTempDir, 'mock-bin');
+    fs.mkdirSync(mockBinDir, { recursive: true });
+
+    const testBrowsers = [
+      'google-chrome',
+      'google-chrome-stable',
+      'google-chrome-beta',
+      'google-chrome-unstable',
+      'chromium',
+      'chromium-browser',
+      'brave-browser',
+      'microsoft-edge'
+    ];
+
+    const originalPath = process.env.PATH || '';
+    process.env.PATH = `${mockBinDir}:${originalPath}`;
+
+    try {
+      for (const browserBin of testBrowsers) {
+        const binFile = path.join(mockBinDir, browserBin);
+        fs.writeFileSync(binFile, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+        // Validar que detectBrowserBinaries detecta o binário instalado
+        const detected = scanner.detectBrowserBinaries();
+        assert.ok(detected.includes(browserBin), `detectBrowserBinaries() deve reconhecer "${browserBin}"`);
+
+        // Validar que o launcher valida o binário descoberto com sucesso
+        const validated = launcher.validateBrowserExecutable(browserBin);
+        assert.strictEqual(validated, binFile, `launcher.validateBrowserExecutable("${browserBin}") deve resolver para "${binFile}"`);
+      }
+    } finally {
+      process.env.PATH = originalPath;
+    }
+    console.log('✓ PASSOU: Descoberta e execução de todos os 8 navegadores Linux consistentes e validadas.');
+
     console.log('\n========================================================');
-    console.log('TODOS OS 12 TESTES DE SANEAMENTO PASSARAM COM SUCESSO!');
+    console.log('TODOS OS 13 TESTES DE SANEAMENTO PASSARAM COM SUCESSO!');
     console.log('========================================================\n');
   } finally {
     // Restaurar configuração padrão limpa no configManager
