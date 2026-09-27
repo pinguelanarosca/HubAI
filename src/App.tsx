@@ -80,16 +80,18 @@ export default function App() {
       setLastLaunchResult(result);
     } catch (err: any) {
       console.error('Falha ao abrir plataforma:', err);
+      const acc = config.accounts.find(a => a.id === accountId);
+      const prov = config.providers.find(p => p.id === selectedProviderId);
       setLastLaunchResult({
         success: false,
         command: '',
-        providerName: selectedProviderId,
-        accountName: accountId,
-        profileDir: '',
-        targetUrl: '',
+        providerName: prov?.name || selectedProviderId,
+        accountName: acc?.name || accountId,
+        profileDir: acc?.chromeProfileDir || '',
+        targetUrl: prov?.defaultUrl || '',
         timestamp: new Date().toISOString(),
         mode: 'command_generated',
-        message: err.message || 'Erro ao comunicar com o servidor'
+        message: err.message || 'Erro ao validar perfil real do Chrome'
       });
     } finally {
       setLaunchingAccountId(null);

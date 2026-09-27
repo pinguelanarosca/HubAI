@@ -11,9 +11,9 @@ export class DiagnosticService {
     const logs: string[] = [];
     const timestamp = new Date().toISOString();
 
-    logs.push(`[${timestamp}] Iniciando diagnóstico abrangente do AI Account Hub...`);
+    logs.push(`[${timestamp}] Iniciando diagnóstico estrito do AI Account Hub...`);
 
-    // 1. Browser Binary Check (se o Chrome consegue ser iniciado/encontrado)
+    // 1. Browser Binary Check (se o executável do navegador existe no Linux)
     const browserBinary = config.system.browserCommand || 'google-chrome';
     let browserStatus: 'passed' | 'warning' | 'failed' = 'failed';
     let browserMessage = '';
@@ -24,111 +24,133 @@ export class DiagnosticService {
       if (whichResult) {
         browserStatus = 'passed';
         browserMessage = `Executável encontrado em: ${whichResult}`;
-        browserDetails = `Comando configurado "${browserBinary}" é executável no Linux.`;
+        browserDetails = `Comando configurado "${browserBinary}" está disponível no PATH do Linux.`;
         logs.push(`✓ Binário do navegador validado: ${whichResult}`);
       } else {
         throw new Error('Não encontrado no PATH');
       }
     } catch {
-      // Check alternative binaries
+      // Check alternative binaries on Linux
       const alternatives = profileScanner.detectBrowserBinaries();
       if (alternatives.length > 0) {
         browserStatus = 'warning';
         browserMessage = `"${browserBinary}" não está no PATH, mas alternativas foram encontradas: ${alternatives.join(', ')}`;
-        browserDetails = `Recomenda-se configurar para "${alternatives[0]}" nas configurações do sistema ou instalar google-chrome.`;
+        browserDetails = `Altere nas configurações para "${alternatives[0]}" ou instale o pacote google-chrome-stable.`;
         logs.push(`⚠ Binário padrão ausente. Alternativas disponíveis: ${alternatives.join(', ')}`);
       } else {
         browserStatus = 'warning';
-        browserMessage = `Nenhum navegador Chrome/Chromium detectado no PATH (/usr/bin). O hub funcionará em modo gerador de comandos para desktop.`;
-        browserDetails = `No Linux com GUI, instale via: sudo apt install google-chrome-stable ou snap install chromium.`;
+        browserMessage = `Nenhum navegador gráfico detectado no PATH do Linux.`;
+        browserDetails = `O Hub gerará os comandos de execução exatos para o seu ambiente desktop local.`;
         logs.push(`⚠ Nenhum binário gráfico de navegador encontrado no PATH.`);
       }
     }
 
     const browserCheck: DiagnosticCheckItem = {
       id: 'browser_binary',
-      name: 'Binário do Navegador Chrome / Chromium',
+      name: 'Executável do Navegador Chrome / Chromium',
       status: browserStatus,
       message: browserMessage,
       details: browserDetails
     };
 
-    // 2. User Data Directory Check (se o diretório de dados existe e pode ser lido)
-    let rawUserDataDir = config.system.chromeUserDataDir;
-    let resolvedUserDataDir = profileScanner.resolvePath(rawUserDataDir);
+    // 2. User Data Directory Check (se o diretório de dados configurado existe REALMENTE no sistema)
+    const rawUserDataDir = config.system.chromeUserDataDir;
+    const resolvedUserDataDir = profileScanner.resolvePath(rawUserDataDir);
 
     let userDataStatus: 'passed' | 'warning' | 'failed' = 'failed';
     let userDataMessage = '';
     let userDataDetails = '';
+    let singletonLockDetected = false;
 
     if (!fs.existsSync(resolvedUserDataDir)) {
-      // Check fallback or sample directory
-      const fallback = path.resolve(process.cwd(), 'data', 'chrome-profiles');
-      if (fs.existsSync(fallback)) {
-        resolvedUserDataDir = fallback;
-        userDataStatus = 'passed';
-        userDataMessage = `Diretório verificado (modo ambiente seguro/local): ${fallback}`;
-        userDataDetails = `Perfis isolados locais prontos para teste e validação de sessão.`;
-        logs.push(`✓ Diretório de perfis local validado: ${fallback}`);
-      } else {
-        // Auto-seed sample profiles
-        profileScanner.ensureSampleProfilesExist(fallback);
-        resolvedUserDataDir = fallback;
-        userDataStatus = 'passed';
-        userDataMessage = `Estrutura de diretórios inicializada em: ${fallback}`;
-        userDataDetails = `Perfis simulados criados com sucesso para os 9 perfis isolados.`;
-        logs.push(`✓ Estrutura de perfis criada em ${fallback}`);
-      }
+      userDataStatus = 'failed';
+      userDataMessage = `Diretório base do Chrome não existe: ${resolvedUserDataDir}`;
+      userDataDetails = `O caminho de perfis configurado não foi encontrado no sistema. Nenhuma pasta foi criada automaticamente. Verifique se o Google Chrome já foi iniciado pelo menos uma vez no computador.`;
+      logs.push(`✗ Diretório base de perfis não encontrado: ${resolvedUserDataDir}`);
     } else {
-      userDataStatus = 'passed';
-      userDataMessage = `Diretório de perfis do Chrome encontrado: ${resolvedUserDataDir}`;
-      userDataDetails = `Acesso de leitura e integridade confirmados.`;
-      logs.push(`✓ Diretório do Chrome existente: ${resolvedUserDataDir}`);
+      try {
+        const stat = fs.statSync(resolvedUserDataDir);
+        if (!stat.isDirectory()) {
+          userDataStatus = 'failed';
+          userDataMessage = `O caminho "${resolvedUserDataDir}" existe mas não é um diretório.`;
+          logs.push(`✗ O caminho "${resolvedUserDataDir}" não é um diretório.`);
+        } else {
+          fs.accessSync(resolvedUserDataDir, fs.constants.R_OK);
+
+          // Check SingletonLock
+          const lockPath = path.join(resolvedUserDataDir, 'SingletonLock');
+          if (fs.existsSync(lockPath)) {
+            singletonLockDetected = true;
+            userDataStatus = 'passed';
+            userDataMessage = `Diretório real do Chrome validado: ${resolvedUserDataDir} (SingletonLock ativo: Chrome em execução)`;
+            userDataDetails = `Instância ativa do Chrome detectada. Comandos com --user-data-dir e --profile-directory direcionarão a nova janela para a sessão correta via IPC.`;
+            logs.push(`✓ Diretório verificado. SingletonLock ativo no Chrome.`);
+          } else {
+            userDataStatus = 'passed';
+            userDataMessage = `Diretório real do Chrome validado: ${resolvedUserDataDir}`;
+            userDataDetails = `Acesso de leitura confirmado. Nenhuma trava de processo ativa detectada.`;
+            logs.push(`✓ Diretório do Chrome existente: ${resolvedUserDataDir}`);
+          }
+        }
+      } catch (err: any) {
+        userDataStatus = 'failed';
+        userDataMessage = `Erro de permissão no diretório: ${err.message}`;
+        logs.push(`✗ Erro ao acessar ${resolvedUserDataDir}: ${err.message}`);
+      }
     }
 
     const userDataDirCheck: DiagnosticCheckItem = {
       id: 'user_data_dir',
-      name: 'Diretório de Perfis do Chrome',
+      name: 'Diretório Base de Perfis (User Data Directory)',
       status: userDataStatus,
       message: userDataMessage,
       details: userDataDetails
     };
 
-    // 3. Accounts & Profile Existence Check (se o perfil Chrome configurado existe e diretório pode ser utilizado)
+    // 3. Accounts & Profile Existence Check (NUNCA CRIA ARQUIVOS OU PASTAS)
     const accountsProfileCheck: DiagnosticReport['accountsProfileCheck'] = [];
 
     for (const account of config.accounts) {
-      const profilePath = path.join(resolvedUserDataDir, account.chromeProfileDir);
-      let accStatus: 'passed' | 'warning' | 'failed' = 'passed';
+      let accStatus: 'passed' | 'warning' | 'failed' = 'failed';
       let accMsg = '';
+      const profilePath = path.join(resolvedUserDataDir, account.chromeProfileDir);
 
-      if (!fs.existsSync(profilePath)) {
-        // Automatically create directory if missing to repair
-        try {
-          fs.mkdirSync(profilePath, { recursive: true });
-          fs.writeFileSync(path.join(profilePath, 'Preferences'), JSON.stringify({
-            profile: { name: account.name },
-            account_info: [{ email: account.email, full_name: account.name }]
-          }, null, 2));
-          accStatus = 'passed';
-          accMsg = `Perfil "${account.chromeProfileDir}" auto-reparado e validado`;
-          logs.push(`✓ [${account.name}] Perfil ${account.chromeProfileDir} criado e pronto.`);
-        } catch (e: any) {
-          accStatus = 'failed';
-          accMsg = `Diretório não existe e não pôde ser criado: ${e.message}`;
-          logs.push(`✗ [${account.name}] Falha no perfil ${account.chromeProfileDir}: ${e.message}`);
-        }
+      if (!fs.existsSync(resolvedUserDataDir)) {
+        accStatus = 'failed';
+        accMsg = `Diretório base do Chrome inacessível (${resolvedUserDataDir}).`;
+        logs.push(`✗ [${account.name}] Falha: diretório base ausente.`);
+      } else if (!fs.existsSync(profilePath)) {
+        accStatus = 'failed';
+        accMsg = `Perfil "${account.chromeProfileDir}" NÃO existe no disco em ${profilePath}. O perfil deve ser criado diretamente no Chrome.`;
+        logs.push(`✗ [${account.name}] Perfil "${account.chromeProfileDir}" inexistente.`);
       } else {
-        // Check read/write
         try {
-          fs.accessSync(profilePath, fs.constants.R_OK);
-          accStatus = 'passed';
-          accMsg = `Perfil validado: diretório "${account.chromeProfileDir}" acessível e isolado.`;
-          logs.push(`✓ [${account.name}] Perfil ${account.chromeProfileDir} verificado em ${profilePath}.`);
-        } catch {
-          accStatus = 'warning';
-          accMsg = `Diretório existe mas sem permissão de escrita/leitura completa.`;
-          logs.push(`⚠ [${account.name}] Problema de permissão no perfil ${account.chromeProfileDir}.`);
+          const stat = fs.statSync(profilePath);
+          if (!stat.isDirectory()) {
+            accStatus = 'failed';
+            accMsg = `O caminho "${profilePath}" existe mas não é uma pasta de perfil válida.`;
+            logs.push(`✗ [${account.name}] Perfil "${account.chromeProfileDir}" não é um diretório.`);
+          } else {
+            fs.accessSync(profilePath, fs.constants.R_OK);
+
+            // Check if profile directory has Preferences or Web Data
+            const hasPrefs = fs.existsSync(path.join(profilePath, 'Preferences'));
+            const lockInProfile = fs.existsSync(path.join(profilePath, 'LOCK'));
+
+            if (hasPrefs) {
+              accStatus = 'passed';
+              accMsg = `Perfil real autenticado e validado (${account.chromeProfileDir})${lockInProfile ? ' [LOCK ativo]' : ''}`;
+              logs.push(`✓ [${account.name}] Perfil real verificado em ${profilePath}.`);
+            } else {
+              accStatus = 'warning';
+              accMsg = `Pasta existe, mas arquivo Preferences do Chrome ainda não foi gerado. Inicie este perfil no Chrome para concluir o registro.`;
+              logs.push(`⚠ [${account.name}] Pasta "${account.chromeProfileDir}" encontrada sem arquivo Preferences.`);
+            }
+          }
+        } catch (permErr: any) {
+          accStatus = 'failed';
+          accMsg = `Sem permissão de acesso ao perfil: ${permErr.message}`;
+          logs.push(`✗ [${account.name}] Permissão negada no perfil "${account.chromeProfileDir}".`);
         }
       }
 
@@ -153,10 +175,10 @@ export class DiagnosticService {
         const parsed = new URL(provider.defaultUrl);
         if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
           urlStatus = 'warning';
-          urlMsg = `Protocolo incomum: ${parsed.protocol}`;
+          urlMsg = `Protocolo não suportado: ${parsed.protocol}`;
         } else {
           urlStatus = 'passed';
-          urlMsg = `URL válida e pronta: ${parsed.hostname}`;
+          urlMsg = `URL válida: ${parsed.hostname}`;
         }
       } catch {
         urlStatus = 'failed';
@@ -172,39 +194,40 @@ export class DiagnosticService {
       });
     }
 
-    // 5. Isolation Check (se a associação Conta → Perfil Chrome está correta e sem colisões indevidas)
+    // 5. Isolation Check (se a associação Conta → Perfil Chrome é única, sem colisões ou sobreposições)
     const profileCounts: Record<string, string[]> = {};
     for (const acc of config.accounts) {
-      if (!profileCounts[acc.chromeProfileDir]) {
-        profileCounts[acc.chromeProfileDir] = [];
+      const p = acc.chromeProfileDir.trim();
+      if (!profileCounts[p]) {
+        profileCounts[p] = [];
       }
-      profileCounts[acc.chromeProfileDir].push(acc.name);
+      profileCounts[p].push(acc.name);
     }
 
     const duplicates = Object.entries(profileCounts).filter(([_, accList]) => accList.length > 1);
     let isolationStatus: 'passed' | 'warning' | 'failed' = 'passed';
-    let isolationMessage = 'Isolamento estrito perfeito: cada uma das 9 contas possui perfil exclusivo.';
+    let isolationMessage = 'Isolamento estrito garantido: cada conta possui perfil exclusivo.';
     let isolationDetails = 'Nenhum risco de contaminação cruzada de cookies ou sessão entre contas.';
 
     if (duplicates.length > 0) {
       isolationStatus = 'warning';
-      const dupDescriptions = duplicates.map(([prof, list]) => `"${prof}" compartilhado por: ${list.join(' & ')}`).join('; ');
-      isolationMessage = `Atenção: Perfis duplicados detectados: ${dupDescriptions}`;
-      isolationDetails = 'Recomenda-se associar um diretório de perfil exclusivo para cada uma das 9 contas para garantir isolamento absoluto.';
+      const dupDescriptions = duplicates.map(([prof, list]) => `"${prof}" usado por: ${list.join(' & ')}`).join('; ');
+      isolationMessage = `Atenção: Perfis compartilhados detectados: ${dupDescriptions}`;
+      isolationDetails = 'Para garantir isolamento absoluto entre contas Google, cada conta deve apontar para um perfil exclusivo.';
       logs.push(`⚠ Alerta de isolamento: ${isolationMessage}`);
     } else {
-      logs.push(`✓ Verificação de isolamento concluída: 9 perfis 100% distintos.`);
+      logs.push(`✓ Isolamento verificado: cada conta associada a um diretório exclusivo.`);
     }
 
     const isolationCheck: DiagnosticCheckItem = {
       id: 'isolation_integrity',
-      name: 'Integridade de Isolamento Conta → Perfil',
+      name: 'Integridade de Isolamento Conta → Perfil Chrome',
       status: isolationStatus,
       message: isolationMessage,
       details: isolationDetails
     };
 
-    // Calculate Overall Status
+    // Overall Status
     const allStatuses = [
       browserStatus,
       userDataStatus,

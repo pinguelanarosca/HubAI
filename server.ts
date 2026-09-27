@@ -31,14 +31,15 @@ async function startServer() {
   app.post('/api/config', (req, res) => {
     try {
       const newConfig = req.body as HubConfig;
-      if (!newConfig || !Array.isArray(newConfig.accounts) || !Array.isArray(newConfig.providers)) {
-        return res.status(400).json({ success: false, error: 'Configuração inválida fornecida' });
-      }
-      const saved = configManager.saveConfig(newConfig);
-      if (saved) {
+      const result = configManager.saveConfig(newConfig);
+      if (result.success) {
         res.json({ success: true, config: configManager.getConfig() });
       } else {
-        res.status(500).json({ success: false, error: 'Falha ao salvar configuração' });
+        res.status(400).json({
+          success: false,
+          errors: result.errors,
+          error: result.errors?.join(' ') || 'Configuração inválida'
+        });
       }
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -75,7 +76,7 @@ async function startServer() {
       const result = await launcherService.launch({ accountId, providerId, targetUrl, dryRun });
       res.json({ success: true, result });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      res.status(400).json({ success: false, error: err.message });
     }
   });
 

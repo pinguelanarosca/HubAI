@@ -32,6 +32,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [localConfig, setLocalConfig] = useState<HubConfig>(JSON.parse(JSON.stringify(config)));
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [detectedProfiles, setDetectedProfiles] = useState<DetectedProfile[]>([]);
   const [scanning, setScanning] = useState(false);
 
@@ -54,13 +55,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const handleSaveAll = async () => {
     setSaving(true);
+    setSaveError(null);
     try {
       const saved = await saveHubConfig(localConfig);
       onConfigSaved(saved);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erro ao salvar:', err);
+      setSaveError(err.message || 'Erro ao validar configuração.');
     } finally {
       setSaving(false);
     }
@@ -161,6 +164,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Error Alert */}
+        {saveError && (
+          <div className="mx-6 mt-4 p-3 bg-rose-950/60 border border-rose-800 text-rose-300 rounded-lg text-xs flex items-start gap-2 leading-relaxed">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+            <div>
+              <span className="font-semibold block mb-0.5">Erro de Validação da Configuração:</span>
+              <span>{saveError}</span>
+            </div>
+          </div>
+        )}
 
         {/* Tab Navigation */}
         <div className="flex border-b border-neutral-800 bg-neutral-950/60 px-6 gap-2">

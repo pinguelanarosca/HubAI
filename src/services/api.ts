@@ -15,19 +15,19 @@ export async function saveHubConfig(config: HubConfig): Promise<HubConfig> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config)
   });
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(`Erro ao salvar configurações: ${res.statusText}`);
+    throw new Error(data.error || `Erro ao salvar configurações: ${res.statusText}`);
   }
-  const data = await res.json();
   return data.config;
 }
 
 export async function resetHubConfig(): Promise<HubConfig> {
   const res = await fetch('/api/config/reset', { method: 'POST' });
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(`Erro ao redefinir configurações: ${res.statusText}`);
+    throw new Error(data.error || `Erro ao redefinir configurações: ${res.statusText}`);
   }
-  const data = await res.json();
   return data.config;
 }
 
@@ -55,10 +55,10 @@ export async function launchPlatform(req: LaunchRequest): Promise<LaunchResult> 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req)
   });
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error('Falha na requisição de abertura');
+    throw new Error(data.error || 'Falha na requisição de abertura');
   }
-  const data = await res.json();
   return data.result;
 }
 
