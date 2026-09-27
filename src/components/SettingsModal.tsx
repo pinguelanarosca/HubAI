@@ -376,26 +376,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {browserVariants.length > 0 && (
                   <div className="pt-2 border-t border-neutral-850 flex flex-wrap items-center gap-2">
                     <span className="text-[11px] text-neutral-500 font-medium">Navegadores no Linux:</span>
-                    {browserVariants.map((b) => (
-                      <button
-                        key={b.id}
-                        onClick={() => {
-                          setLocalConfig((prev) => ({
-                            ...prev,
-                            system: { ...prev.system, chromeUserDataDir: b.userDataDir }
-                          }));
-                          handleSyncChromeAccounts(b.userDataDir);
-                        }}
-                        className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${
-                          b.exists
-                            ? 'bg-neutral-900 border-neutral-700 text-neutral-300 hover:border-neutral-500'
-                            : 'bg-neutral-950 border-neutral-850 text-neutral-600 opacity-60'
-                        }`}
-                        title={b.userDataDir}
-                      >
-                        {b.name} {b.exists ? `(${b.profileCount} perfis)` : '(não instalado)'}
-                      </button>
-                    ))}
+                    {browserVariants.map((b) => {
+                      const isReady = b.exists && !!b.detectedBinary;
+                      return (
+                        <button
+                          key={b.id}
+                          disabled={!isReady}
+                          onClick={() => {
+                            if (!isReady || !b.detectedBinary) return;
+                            setLocalConfig((prev) => ({
+                              ...prev,
+                              system: {
+                                ...prev.system,
+                                chromeUserDataDir: b.userDataDir,
+                                browserCommand: b.detectedBinary!
+                              }
+                            }));
+                            handleSyncChromeAccounts(b.userDataDir);
+                          }}
+                          className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${
+                            isReady
+                              ? 'bg-neutral-900 border-neutral-700 text-neutral-300 hover:border-neutral-500 cursor-pointer'
+                              : 'bg-neutral-950 border-neutral-850 text-neutral-600 opacity-60 cursor-not-allowed'
+                          }`}
+                          title={
+                            isReady
+                              ? `${b.userDataDir} (Executável: ${b.detectedBinary})`
+                              : b.exists
+                              ? `${b.userDataDir} (Executável não detectado no PATH)`
+                              : 'Não instalado no sistema'
+                          }
+                        >
+                          {b.name}{' '}
+                          {isReady
+                            ? `(${b.profileCount} perfis)`
+                            : b.exists
+                            ? '(sem executável)'
+                            : '(não instalado)'}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>

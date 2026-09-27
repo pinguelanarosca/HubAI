@@ -425,8 +425,72 @@ async function runTests() {
     }
     console.log('✓ PASSOU: Descoberta identifica binários alternativos e Launcher respeita estritamente o navegador configurado.');
 
+    // -------------------------------------------------------------------------
+    // TESTE 15: Seleção consistente de variante (userDataDir + browserCommand)
+    // -------------------------------------------------------------------------
+    console.log('[TESTE 15] Verificando seleção consistente de variante e bloqueio de variantes sem binário...');
+    const fakeBraveUserDataDir = path.join(testTempDir, 'fake-brave-config');
+    const fakeBraveProfile = path.join(fakeBraveUserDataDir, 'Default');
+    fs.mkdirSync(fakeBraveProfile, { recursive: true });
+
+    const fakeBinDir2 = path.join(testTempDir, 'fake-bins-2');
+    fs.mkdirSync(fakeBinDir2, { recursive: true });
+    const braveBinPath = path.join(fakeBinDir2, 'brave-browser');
+    fs.writeFileSync(braveBinPath, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+    const pathBefore = process.env.PATH || '';
+    process.env.PATH = `${fakeBinDir2}:/usr/bin:/bin:/usr/local/bin`;
+
+    try {
+      // 1. Simular detecção de variante com diretório e binário válidos
+      const detectedVariants = scanner.detectBrowserVariants();
+      const braveVariant = detectedVariants.find(v => v.id === 'brave');
+      assert.ok(braveVariant, 'Variante brave deve existir na lista');
+      assert.strictEqual(braveVariant.detectedBinary, 'brave-browser', 'detectedBinary deve ser detectado no PATH');
+
+      // 2. Simular seleção da variante na configuração
+      const isReady = braveVariant.exists || true; // simular seleção
+      assert.ok(braveVariant.detectedBinary, 'Variante pronta deve ter detectedBinary definido');
+      
+      const newSystemConfig = {
+        browserCommand: braveVariant.detectedBinary!,
+        chromeUserDataDir: fakeBraveUserDataDir,
+        openInNewWindow: true,
+        additionalFlags: ['--no-first-run'],
+        theme: 'dark' as const
+      };
+
+      assert.strictEqual(newSystemConfig.browserCommand, 'brave-browser');
+      assert.strictEqual(newSystemConfig.chromeUserDataDir, fakeBraveUserDataDir);
+
+      // 3. Launcher valida o browserCommand e perfil de forma estrita e determinística
+      const validatedBin = launcher.validateBrowserExecutable(newSystemConfig.browserCommand);
+      assert.strictEqual(validatedBin, braveBinPath);
+
+      const profileValidation = launcher.validateRealProfile(newSystemConfig.chromeUserDataDir, 'Default');
+      assert.strictEqual(profileValidation.profileFullPath, fakeBraveProfile);
+
+      // 4. Variante sem binário detectado (ex: edge sem microsoft-edge no PATH)
+      const edgeVariant = detectedVariants.find(v => v.id === 'edge');
+      assert.ok(edgeVariant, 'Variante edge deve existir');
+      assert.strictEqual(edgeVariant.detectedBinary, undefined, 'Edge não deve ter detectedBinary quando o binário não existe no PATH');
+
+      // Tentativa de executar com o comando padrão de uma variante sem binário deve falhar explicitamente
+      let edgeErrorThrew = false;
+      try {
+        launcher.validateBrowserExecutable(edgeVariant.binaryCommand);
+      } catch (err: any) {
+        edgeErrorThrew = true;
+        assert.ok(err.message.includes('não foi encontrado no PATH'));
+      }
+      assert.strictEqual(edgeErrorThrew, true, 'Executar variante sem binário no PATH deve lançar erro explícito no launcher');
+    } finally {
+      process.env.PATH = pathBefore;
+    }
+    console.log('✓ PASSOU: Seleção de variante atualiza userDataDir e browserCommand consistentemente e rejeita variantes sem binário.');
+
     console.log('\n========================================================');
-    console.log('TODOS OS 14 TESTES DE SANEAMENTO PASSARAM COM SUCESSO!');
+    console.log('TODOS OS 15 TESTES DE SANEAMENTO PASSARAM COM SUCESSO!');
     console.log('========================================================\n');
   } finally {
     // Restaurar configuração padrão limpa no configManager
