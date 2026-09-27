@@ -22,7 +22,8 @@ export const AccountCard: React.FC<AccountCardProps> = ({
 
   // Target URL (check for account-specific override)
   const targetUrl = account.customUrls?.[activeProvider.id] || activeProvider.defaultUrl;
-  const linuxCmd = `google-chrome --user-data-dir="~/.config/google-chrome" --profile-directory="${account.chromeProfileDir}" --new-window "${targetUrl}"`;
+  const userDir = account.userDataDir || '~/.config/google-chrome';
+  const linuxCmd = `google-chrome --user-data-dir="${userDir}" --profile-directory="${account.chromeProfileDir}" --new-window "${targetUrl}"`;
 
   const handleCopyCommand = (e: React.MouseEvent) => {
     e.stopPropagation();

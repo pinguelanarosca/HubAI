@@ -1,13 +1,19 @@
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
-import { configManager } from './configManager.js';
+import { configManager, ConfigManager } from './configManager.js';
 import { profileScanner } from './profileScanner.js';
 import { DiagnosticReport, DiagnosticCheckItem } from '../src/types.js';
 
 export class DiagnosticService {
+  private configManager: ConfigManager;
+
+  constructor(cfgManager?: ConfigManager) {
+    this.configManager = cfgManager || configManager;
+  }
+
   public async runFullDiagnostic(): Promise<DiagnosticReport> {
-    const config = configManager.getConfig();
+    const config = this.configManager.getConfig();
     const logs: string[] = [];
     const timestamp = new Date().toISOString();
 
@@ -30,16 +36,16 @@ export class DiagnosticService {
         throw new Error('Não encontrado no PATH');
       }
     } catch {
-      // Check alternative binaries on Linux
+      // Check alternative chromium binaries on Linux (excluding non-browsers)
       const alternatives = profileScanner.detectBrowserBinaries();
       if (alternatives.length > 0) {
         browserStatus = 'warning';
-        browserMessage = `"${browserBinary}" não está no PATH, mas alternativas foram encontradas: ${alternatives.join(', ')}`;
+        browserMessage = `"${browserBinary}" não está no PATH, mas navegadores alternativos foram encontrados: ${alternatives.join(', ')}`;
         browserDetails = `Altere nas configurações para "${alternatives[0]}" ou instale o pacote google-chrome-stable.`;
         logs.push(`⚠ Binário padrão ausente. Alternativas disponíveis: ${alternatives.join(', ')}`);
       } else {
         browserStatus = 'warning';
-        browserMessage = `Nenhum navegador gráfico detectado no PATH do Linux.`;
+        browserMessage = `Nenhum navegador gráfico compatível detectado no PATH do Linux.`;
         browserDetails = `O Hub gerará os comandos de execução exatos para o seu ambiente desktop local.`;
         logs.push(`⚠ Nenhum binário gráfico de navegador encontrado no PATH.`);
       }
@@ -107,21 +113,34 @@ export class DiagnosticService {
       details: userDataDetails
     };
 
-    // 3. Accounts & Profile Existence Check (NUNCA CRIA ARQUIVOS OU PASTAS)
+    // 3. Scan real profiles on disk for cross-comparison
+    const scan = profileScanner.scanProfiles(config.system.chromeUserDataDir);
+    const discoveredProfileDirs = new Set(scan.profiles.map(p => p.dirName));
+
+    // 4. Accounts & Profile Existence Check (NUNCA CRIA ARQUIVOS OU PASTAS)
     const accountsProfileCheck: DiagnosticReport['accountsProfileCheck'] = [];
+    const lockedProfiles: string[] = [];
+    let linkedAccountsCount = 0;
+    let unlinkedAccountsCount = 0;
 
     for (const account of config.accounts) {
       let accStatus: 'passed' | 'warning' | 'failed' = 'failed';
       let accMsg = '';
-      const profilePath = path.join(resolvedUserDataDir, account.chromeProfileDir);
+      const accountUserDataDir = account.userDataDir
+        ? profileScanner.resolvePath(account.userDataDir)
+        : resolvedUserDataDir;
 
-      if (!fs.existsSync(resolvedUserDataDir)) {
+      const profilePath = path.join(accountUserDataDir, account.chromeProfileDir);
+
+      if (!fs.existsSync(accountUserDataDir)) {
         accStatus = 'failed';
-        accMsg = `Diretório base do Chrome inacessível (${resolvedUserDataDir}).`;
+        accMsg = `Diretório base do Chrome inacessível (${accountUserDataDir}).`;
+        unlinkedAccountsCount++;
         logs.push(`✗ [${account.name}] Falha: diretório base ausente.`);
       } else if (!fs.existsSync(profilePath)) {
         accStatus = 'failed';
         accMsg = `Perfil "${account.chromeProfileDir}" NÃO existe no disco em ${profilePath}. O perfil deve ser criado diretamente no Chrome.`;
+        unlinkedAccountsCount++;
         logs.push(`✗ [${account.name}] Perfil "${account.chromeProfileDir}" inexistente.`);
       } else {
         try {
@@ -129,27 +148,34 @@ export class DiagnosticService {
           if (!stat.isDirectory()) {
             accStatus = 'failed';
             accMsg = `O caminho "${profilePath}" existe mas não é uma pasta de perfil válida.`;
+            unlinkedAccountsCount++;
             logs.push(`✗ [${account.name}] Perfil "${account.chromeProfileDir}" não é um diretório.`);
           } else {
             fs.accessSync(profilePath, fs.constants.R_OK);
 
-            // Check if profile directory has Preferences or Web Data
             const hasPrefs = fs.existsSync(path.join(profilePath, 'Preferences'));
             const lockInProfile = fs.existsSync(path.join(profilePath, 'LOCK'));
+
+            if (lockInProfile || (accountUserDataDir === resolvedUserDataDir && singletonLockDetected)) {
+              lockedProfiles.push(`${account.name} (${account.chromeProfileDir})`);
+            }
 
             if (hasPrefs) {
               accStatus = 'passed';
               accMsg = `Perfil real localizado e legível (${account.chromeProfileDir}) com arquivo Preferences verificado${lockInProfile ? ' [LOCK local ativo]' : ''}`;
+              linkedAccountsCount++;
               logs.push(`✓ [${account.name}] Perfil real verificado em ${profilePath}.`);
             } else {
               accStatus = 'warning';
               accMsg = `Pasta do perfil existe, mas arquivo Preferences do Chrome ainda não foi gerado. Inicie este perfil no Chrome para concluir o registro.`;
+              linkedAccountsCount++;
               logs.push(`⚠ [${account.name}] Pasta "${account.chromeProfileDir}" encontrada sem arquivo Preferences.`);
             }
           }
         } catch (permErr: any) {
           accStatus = 'failed';
           accMsg = `Sem permissão de acesso ao perfil: ${permErr.message}`;
+          unlinkedAccountsCount++;
           logs.push(`✗ [${account.name}] Permissão negada no perfil "${account.chromeProfileDir}".`);
         }
       }
@@ -158,13 +184,14 @@ export class DiagnosticService {
         accountId: account.id,
         accountName: account.name,
         profileDir: account.chromeProfileDir,
+        userDataDir: account.userDataDir,
         status: accStatus,
         message: accMsg,
         path: profilePath
       });
     }
 
-    // 4. URL Check (se a URL configurada pode ser aberta e é válida)
+    // 5. URL Check (se a URL configurada pode ser aberta e é válida)
     const urlCheck: DiagnosticReport['urlCheck'] = [];
     for (const provider of config.providers) {
       if (!provider.enabled) continue;
@@ -194,25 +221,30 @@ export class DiagnosticService {
       });
     }
 
-    // 5. Isolation Check (se a associação Conta → Perfil Chrome é única, sem colisões ou sobreposições)
+    // 6. Isolation Check (se a associação Conta → Perfil Chrome é única, sem colisões ou sobreposições)
     const profileCounts: Record<string, string[]> = {};
     for (const acc of config.accounts) {
-      const p = acc.chromeProfileDir.trim();
-      if (!profileCounts[p]) {
-        profileCounts[p] = [];
+      const uDir = acc.userDataDir ? profileScanner.resolvePath(acc.userDataDir) : resolvedUserDataDir;
+      const key = `${uDir}::${acc.chromeProfileDir.trim()}`;
+      if (!profileCounts[key]) {
+        profileCounts[key] = [];
       }
-      profileCounts[p].push(acc.name);
+      profileCounts[key].push(acc.name);
     }
 
     const duplicates = Object.entries(profileCounts).filter(([_, accList]) => accList.length > 1);
+    const duplicateProfileDescriptions = duplicates.map(([key, list]) => {
+      const parts = key.split('::');
+      return `"${parts[1]}" (${parts[0]}) compartilhado por: ${list.join(' & ')}`;
+    });
+
     let isolationStatus: 'passed' | 'warning' | 'failed' = 'passed';
     let isolationMessage = 'Isolamento estrito garantido: cada conta possui perfil exclusivo.';
     let isolationDetails = 'Nenhum risco de contaminação cruzada de cookies ou sessão entre contas.';
 
     if (duplicates.length > 0) {
       isolationStatus = 'warning';
-      const dupDescriptions = duplicates.map(([prof, list]) => `"${prof}" usado por: ${list.join(' & ')}`).join('; ');
-      isolationMessage = `Atenção: Perfis compartilhados detectados: ${dupDescriptions}`;
+      isolationMessage = `Atenção: Perfis compartilhados detectados: ${duplicateProfileDescriptions.join('; ')}`;
       isolationDetails = 'Para garantir isolamento absoluto entre contas Google, cada conta deve apontar para um perfil exclusivo.';
       logs.push(`⚠ Alerta de isolamento: ${isolationMessage}`);
     } else {
@@ -225,6 +257,25 @@ export class DiagnosticService {
       status: isolationStatus,
       message: isolationMessage,
       details: isolationDetails
+    };
+
+    // Calculate unlinked profiles on disk (profiles in targetDir not associated with any account)
+    const assignedProfileDirsInMainDir = new Set(
+      config.accounts
+        .filter(a => !a.userDataDir || profileScanner.resolvePath(a.userDataDir) === resolvedUserDataDir)
+        .map(a => a.chromeProfileDir)
+    );
+    const unlinkedProfiles = scan.profiles.filter(p => !assignedProfileDirsInMainDir.has(p.dirName));
+
+    // Summary calculation
+    const summary: DiagnosticReport['summary'] = {
+      discoveredProfilesCount: scan.profiles.length,
+      linkedAccountsCount,
+      unlinkedProfilesCount: unlinkedProfiles.length,
+      unlinkedAccountsCount,
+      duplicateProfiles: duplicateProfileDescriptions,
+      lockedProfiles,
+      userDataDirUsed: resolvedUserDataDir
     };
 
     // Overall Status
@@ -253,6 +304,7 @@ export class DiagnosticService {
       accountsProfileCheck,
       urlCheck,
       isolationCheck,
+      summary,
       logs
     };
   }

@@ -7,6 +7,7 @@ import { configManager } from './server/configManager.js';
 import { profileScanner } from './server/profileScanner.js';
 import { diagnosticService } from './server/diagnosticService.js';
 import { launcherService } from './server/launcherService.js';
+import { updateService } from './server/updateService.js';
 import { HubConfig } from './src/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -22,7 +23,12 @@ async function startServer() {
   app.get('/api/config', (req, res) => {
     try {
       const config = configManager.getConfig();
-      res.json({ success: true, config });
+      res.json({
+        success: true,
+        config,
+        configDir: configManager.getConfigDir(),
+        configFile: configManager.getConfigFile()
+      });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -55,12 +61,59 @@ async function startServer() {
     }
   });
 
-  // 2. Profile & System Discovery Endpoints
-  app.get('/api/system/profiles', (req, res) => {
+  // 2. Profile Discovery & Synchronization Endpoints (Google Chrome / Chromium)
+  const handleSync = (req: express.Request, res: express.Response) => {
+    try {
+      const customUserDataDir = req.query.userDataDir as string | undefined;
+      const syncResult = profileScanner.syncAccountsWithProfiles(customUserDataDir);
+      res.json({ success: true, sync: syncResult });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  };
+
+  const handleImport = (req: express.Request, res: express.Response) => {
+    try {
+      const { bindings } = req.body;
+      const result = profileScanner.importMatchedProfiles(bindings);
+      if (result.success) {
+        res.json({
+          success: true,
+          updatedAccountsCount: result.updatedAccountsCount,
+          config: configManager.getConfig()
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          errors: result.errors,
+          error: result.errors?.join(' ') || 'Falha ao importar perfis'
+        });
+      }
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  };
+
+  app.get('/api/profiles/detect', (req, res) => {
     try {
       const customUserDataDir = req.query.userDataDir as string | undefined;
       const info = profileScanner.getSystemBrowserInfo(customUserDataDir);
       res.json({ success: true, data: info });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/profiles/sync', handleSync);
+  app.get('/api/chrome/sync', handleSync);
+
+  app.post('/api/profiles/import', handleImport);
+  app.post('/api/chrome/import', handleImport);
+
+  app.get('/api/system/browser-variants', (req, res) => {
+    try {
+      const variants = profileScanner.detectBrowserVariants();
+      res.json({ success: true, variants });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -90,7 +143,39 @@ async function startServer() {
     }
   });
 
-  // 5. Script & Desktop Shortcuts Export
+  // 5. Update Endpoints (Git / GitHub verification, backup and safe rollback)
+  const handleCheckUpdate = async (req: express.Request, res: express.Response) => {
+    try {
+      const force = req.query.force === 'true' || req.method === 'POST';
+      const status = await updateService.checkUpdate(force);
+      res.json({ success: true, status });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  };
+
+  const handleApplyUpdate = async (_req: express.Request, res: express.Response) => {
+    try {
+      const result = await updateService.applyUpdate();
+      if (result.success) {
+        res.json({ success: true, result });
+      } else {
+        res.status(500).json({ success: false, result, error: result.error || result.message });
+      }
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  };
+
+  app.get('/api/update/status', handleCheckUpdate);
+  app.post('/api/update/check', handleCheckUpdate);
+  app.get('/api/app/check-update', handleCheckUpdate);
+  app.post('/api/app/check-update', handleCheckUpdate);
+
+  app.post('/api/update/apply', handleApplyUpdate);
+  app.post('/api/app/apply-update', handleApplyUpdate);
+
+  // 6. Script & Desktop Shortcuts Export
   app.get('/api/export/bash-script', (req, res) => {
     try {
       const script = launcherService.generateBashScript();
@@ -108,7 +193,6 @@ async function startServer() {
       let installedCount = 0;
       const errors: string[] = [];
 
-      // Try writing to user's .local/share/applications if writable
       for (const sc of shortcuts) {
         try {
           const dir = path.dirname(sc.path);
@@ -138,22 +222,23 @@ async function startServer() {
   if (process.env.NODE_ENV === 'production' && fs.existsSync(path.resolve(__dirname, 'dist'))) {
     app.use(express.static(path.resolve(__dirname, 'dist')));
     app.get('*', (req, res) => {
-      res.sendFile(path.resolve(__dirname, 'dist/index.html'));
+      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
     });
   } else {
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: 'spa',
+      appType: 'spa'
     });
     app.use(vite.middlewares);
   }
 
-  app.listen(Number(PORT), '0.0.0.0', () => {
-    console.log(`[AI Account Hub] Servidor rodando em http://0.0.0.0:${PORT}`);
+  app.listen(PORT, () => {
+    console.log(`[HubAI] Servidor rodando na porta ${PORT}`);
+    console.log(`[HubAI] Configuração do usuário: ${configManager.getConfigFile()}`);
   });
 }
 
 startServer().catch(err => {
-  console.error('[AI Account Hub] Erro fatal ao iniciar servidor:', err);
+  console.error('[HubAI] Erro fatal na inicialização do servidor:', err);
   process.exit(1);
 });

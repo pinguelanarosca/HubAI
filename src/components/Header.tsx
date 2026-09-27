@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, Settings, Terminal, Shield } from 'lucide-react';
+import { Activity, Settings, Terminal, Shield, RefreshCw } from 'lucide-react';
 import { AIProvider } from '../types.js';
 
 interface HeaderProps {
@@ -7,6 +7,8 @@ interface HeaderProps {
   onOpenDiagnostics: () => void;
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
+  onOpenUpdate: () => void;
+  hasUpdate?: boolean;
   diagnosticStatus?: 'passed' | 'warning' | 'failed' | null;
 }
 
@@ -15,6 +17,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenDiagnostics,
   onOpenSettings,
   onOpenShortcuts,
+  onOpenUpdate,
+  hasUpdate,
   diagnosticStatus
 }) => {
   return (
@@ -26,7 +30,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
         <div>
           <span className="text-base font-semibold tracking-tight text-neutral-100">
-            AI Account Hub
+            HubAI
           </span>
           <span className="text-xs text-neutral-500 hidden sm:inline ml-2.5 font-normal">
             Linux Desktop Isolation
@@ -46,6 +50,23 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Zone 3: Primary action buttons */}
       <div className="flex items-center gap-2">
+        {/* Atualizar Hub Button */}
+        <button
+          onClick={onOpenUpdate}
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap border ${
+            hasUpdate
+              ? 'bg-indigo-950/80 hover:bg-indigo-900 border-indigo-700 text-indigo-300 animate-pulse'
+              : 'text-neutral-300 hover:text-neutral-100 bg-neutral-900 hover:bg-neutral-850 border-neutral-800'
+          }`}
+          title="Verificar e instalar atualizações do GitHub (pinguelanarosca/HubAI)"
+        >
+          <RefreshCw className="w-3.5 h-3.5 text-indigo-400" />
+          <span>Atualizar Hub</span>
+          {hasUpdate && (
+            <span className="w-2 h-2 rounded-full bg-indigo-400 inline-block" title="Nova versão disponível" />
+          )}
+        </button>
+
         <button
           onClick={onOpenShortcuts}
           className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-neutral-300 hover:text-neutral-100 bg-neutral-900 hover:bg-neutral-850 border border-neutral-800 rounded-lg transition-colors whitespace-nowrap"

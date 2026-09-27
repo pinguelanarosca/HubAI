@@ -2,11 +2,17 @@ import { spawn, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { configManager } from './configManager.js';
+import { configManager, ConfigManager } from './configManager.js';
 import { profileScanner } from './profileScanner.js';
 import { LaunchRequest, LaunchResult } from '../src/types.js';
 
 export class LauncherService {
+  private configManager: ConfigManager;
+
+  constructor(cfgManager?: ConfigManager) {
+    this.configManager = cfgManager || configManager;
+  }
+
   /**
    * Validates that the configured browser executable actually exists and can be executed on Linux.
    * Throws an explicit error if the binary is missing or not executable.
@@ -160,7 +166,7 @@ export class LauncherService {
   }
 
   public async launch(req: LaunchRequest): Promise<LaunchResult> {
-    const config = configManager.getConfig();
+    const config = this.configManager.getConfig();
     const account = config.accounts.find(a => a.id === req.accountId);
     const provider = config.providers.find(p => p.id === req.providerId);
 
@@ -174,6 +180,7 @@ export class LauncherService {
     // Determine target URL
     const targetUrl = req.targetUrl || account.customUrls?.[provider.id] || provider.defaultUrl;
     const profileDir = account.chromeProfileDir;
+    const effectiveUserDataDir = account.userDataDir || config.system.chromeUserDataDir;
     const browserCommand = config.system.browserCommand || 'google-chrome';
     const openInNewWindow = config.system.openInNewWindow !== false;
     const extraFlags = config.system.additionalFlags || ['--no-first-run'];
@@ -181,9 +188,9 @@ export class LauncherService {
     // 1. STRICT VALIDATION: Check that the configured browser executable actually exists!
     const validatedBinary = this.validateBrowserExecutable(browserCommand);
 
-    // 2. STRICT VALIDATION: Check real profile on disk first!
+    // 2. STRICT VALIDATION: Check real profile on disk first with explicit userDataDir!
     const { resolvedUserDataDir } = this.validateRealProfile(
-      config.system.chromeUserDataDir,
+      effectiveUserDataDir,
       profileDir
     );
 
@@ -198,7 +205,7 @@ export class LauncherService {
     );
 
     // Update account last used timestamp
-    configManager.updateAccountLastUsed(account.id);
+    this.configManager.updateAccountLastUsed(account.id);
     const timestamp = new Date().toISOString();
 
     if (req.dryRun) {
@@ -208,10 +215,11 @@ export class LauncherService {
         providerName: provider.name,
         accountName: account.name,
         profileDir,
+        userDataDir: resolvedUserDataDir,
         targetUrl,
         timestamp,
         mode: 'dry_run',
-        message: `Executável e perfil real "${profileDir}" validados com sucesso. Comando idêntico ao de execução.`
+        message: `Executável e perfil real "${profileDir}" validados com sucesso em "${resolvedUserDataDir}". Comando idêntico ao de execução.`
       };
     }
 
@@ -235,10 +243,11 @@ export class LauncherService {
           providerName: provider.name,
           accountName: account.name,
           profileDir,
+          userDataDir: resolvedUserDataDir,
           targetUrl,
           timestamp,
           mode: 'executed',
-          message: `Navegador iniciado com sucesso no perfil "${profileDir}".`
+          message: `Navegador iniciado com sucesso no perfil "${profileDir}" em "${resolvedUserDataDir}".`
         };
       } else {
         return {
@@ -247,6 +256,7 @@ export class LauncherService {
           providerName: provider.name,
           accountName: account.name,
           profileDir,
+          userDataDir: resolvedUserDataDir,
           targetUrl,
           timestamp,
           mode: 'command_generated',
@@ -261,6 +271,7 @@ export class LauncherService {
         providerName: provider.name,
         accountName: account.name,
         profileDir,
+        userDataDir: resolvedUserDataDir,
         targetUrl,
         timestamp,
         mode: 'command_generated',
@@ -274,19 +285,20 @@ export class LauncherService {
    * Only generates shortcuts for profiles that actually exist on disk, using the exact command parameters.
    */
   public generateDesktopShortcuts(): { path: string; content: string }[] {
-    const config = configManager.getConfig();
+    const config = this.configManager.getConfig();
     const shortcuts: { path: string; content: string }[] = [];
     const desktopDir = path.join(os.homedir(), '.local', 'share', 'applications');
-    const resolvedUserDataDir = profileScanner.resolvePath(config.system.chromeUserDataDir);
 
     for (const acc of config.accounts) {
-      // Validate that the profile exists before generating shortcut
+      const userDir = acc.userDataDir || config.system.chromeUserDataDir;
       try {
-        this.validateRealProfile(config.system.chromeUserDataDir, acc.chromeProfileDir);
+        this.validateRealProfile(userDir, acc.chromeProfileDir);
       } catch {
         // Skip profiles that do not exist on disk
         continue;
       }
+
+      const resolvedUserDataDir = profileScanner.resolvePath(userDir);
 
       for (const prov of config.providers.filter(p => p.enabled)) {
         const targetUrl = acc.customUrls?.[prov.id] || prov.defaultUrl;
@@ -325,8 +337,8 @@ Keywords=AI;${prov.name};${acc.name};
    * Generates a standalone interactive bash script for Linux terminal with exact parameter consistency and validations.
    */
   public generateBashScript(): string {
-    const config = configManager.getConfig();
-    const resolvedUserDataDir = profileScanner.resolvePath(config.system.chromeUserDataDir);
+    const config = this.configManager.getConfig();
+    const defaultResolvedDir = profileScanner.resolvePath(config.system.chromeUserDataDir);
     const extraFlagsStr = (config.system.additionalFlags || ['--no-first-run']).join(' ');
     const newWindowFlag = config.system.openInNewWindow !== false ? '--new-window ' : '';
 
@@ -337,19 +349,12 @@ Keywords=AI;${prov.name};${acc.name};
 set -e
 
 BROWSER="${config.system.browserCommand}"
-USER_DATA_DIR="${resolvedUserDataDir}"
+DEFAULT_USER_DATA_DIR="${defaultResolvedDir}"
 
 # 1. Validar executável do navegador
 if ! command -v "$BROWSER" &> /dev/null; then
   echo "ERRO: O executável do navegador '$BROWSER' não foi encontrado no PATH do sistema."
   echo "Instale o navegador ou ajuste o comando nas configurações do Hub."
-  exit 1
-fi
-
-# 2. Validar diretório de dados base
-if [ ! -d "$USER_DATA_DIR" ]; then
-  echo "ERRO: O diretório base do Chrome '$USER_DATA_DIR' não existe no disco."
-  echo "Verifique o caminho nas configurações."
   exit 1
 fi
 
@@ -377,11 +382,19 @@ echo ""
 read -p "Digite o número da Conta [1-${config.accounts.length}]: " ACC_CHOICE
 
 case $ACC_CHOICE in
-${config.accounts.map((a, idx) => `  ${idx + 1}) PROFILE_DIR="${a.chromeProfileDir}"; ACC_NAME="${a.name}" ;;`).join('\n')}
+${config.accounts.map((a, idx) => {
+  const accDir = a.userDataDir ? profileScanner.resolvePath(a.userDataDir) : defaultResolvedDir;
+  return `  ${idx + 1}) PROFILE_DIR="${a.chromeProfileDir}"; ACC_NAME="${a.name}"; USER_DATA_DIR="${accDir}" ;;`;
+}).join('\n')}
   *) echo "Opção inválida"; exit 1 ;;
 esac
 
 echo ""
+if [ ! -d "$USER_DATA_DIR" ]; then
+  echo "ERRO: O diretório base '$USER_DATA_DIR' não existe no disco."
+  exit 1
+fi
+
 PROFILE_PATH="$USER_DATA_DIR/$PROFILE_DIR"
 if [ ! -d "$PROFILE_PATH" ]; then
   echo "ERRO: O perfil '$PROFILE_DIR' não existe em '$USER_DATA_DIR'."
@@ -389,7 +402,7 @@ if [ ! -d "$PROFILE_PATH" ]; then
   exit 1
 fi
 
-echo "-> Abrindo $PROV_NAME na conta $ACC_NAME (Perfil: $PROFILE_DIR)..."
+echo "-> Abrindo $PROV_NAME na conta $ACC_NAME (Perfil: $PROFILE_DIR em $USER_DATA_DIR)..."
 $BROWSER --user-data-dir="$USER_DATA_DIR" --profile-directory="$PROFILE_DIR" ${newWindowFlag}${extraFlagsStr} "$TARGET_URL" &
 echo "Sucesso!"
 `;

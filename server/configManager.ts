@@ -1,25 +1,43 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import { HubConfig, HubAccount, AIProvider } from '../src/types.js';
 import { defaultHubConfig } from './defaultConfig.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DATA_DIR = path.resolve(__dirname, '../data');
-const CONFIG_FILE = path.join(DATA_DIR, 'hub-config.json');
 
 export class ConfigManager {
   private config: HubConfig;
+  private configDir: string;
+  private configFile: string;
+  private legacyConfigFile: string;
 
-  constructor() {
-    this.ensureDataDir();
+  constructor(customConfigDir?: string) {
+    this.configDir = customConfigDir || process.env.HUBAI_CONFIG_DIR || path.join(os.homedir(), '.config', 'hubai');
+    this.configFile = path.join(this.configDir, 'hub-config.json');
+    this.legacyConfigFile = path.resolve(__dirname, '../data', 'hub-config.json');
+
+    this.ensureConfigDir();
     this.config = this.loadConfig();
   }
 
-  private ensureDataDir() {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+  public getConfigDir(): string {
+    return this.configDir;
+  }
+
+  public getConfigFile(): string {
+    return this.configFile;
+  }
+
+  private ensureConfigDir() {
+    if (!fs.existsSync(this.configDir)) {
+      try {
+        fs.mkdirSync(this.configDir, { recursive: true });
+      } catch (err) {
+        console.error('[ConfigManager] Falha ao criar diretório de configuração do usuário:', err);
+      }
     }
   }
 
@@ -51,7 +69,8 @@ export class ConfigManager {
       errors.push('A lista de contas ("accounts") deve ser um array com pelo menos 1 conta.');
     } else {
       const seenAccountIds = new Set<string>();
-      const seenProfileDirs = new Set<string>();
+      const seenProfileKeys = new Set<string>();
+      const defaultUserDir = candidate.system?.chromeUserDataDir || '~/.config/google-chrome';
 
       for (let i = 0; i < candidate.accounts.length; i++) {
         const acc = candidate.accounts[i];
@@ -79,10 +98,16 @@ export class ConfigManager {
           if (cleanDir.includes('..') || cleanDir.includes('/') || cleanDir.includes('\\')) {
             errors.push(`Conta "${acc.name}": "chromeProfileDir" contém caracteres ilegais ou tentativa de path traversal ("${cleanDir}").`);
           }
-          if (seenProfileDirs.has(cleanDir)) {
-            errors.push(`Colisão de perfil: O perfil "${cleanDir}" foi atribuído a mais de uma conta. Cada conta deve ter perfil exclusivo.`);
+
+          const targetUserDataDir = (acc.userDataDir && typeof acc.userDataDir === 'string')
+            ? acc.userDataDir.trim()
+            : defaultUserDir;
+
+          const profileKey = `${targetUserDataDir}::${cleanDir}`;
+          if (seenProfileKeys.has(profileKey)) {
+            errors.push(`Colisão de perfil: O perfil "${cleanDir}" em "${targetUserDataDir}" foi atribuído a mais de uma conta. Cada conta deve ter perfil exclusivo.`);
           } else {
-            seenProfileDirs.add(cleanDir);
+            seenProfileKeys.add(profileKey);
           }
         }
       }
@@ -135,26 +160,44 @@ export class ConfigManager {
   }
 
   public loadConfig(): HubConfig {
-    this.ensureDataDir();
+    this.ensureConfigDir();
 
-    if (fs.existsSync(CONFIG_FILE)) {
+    // 1. Check user standard config directory ~/.config/hubai/hub-config.json
+    if (fs.existsSync(this.configFile)) {
       try {
-        const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
+        const raw = fs.readFileSync(this.configFile, 'utf-8');
         const parsed = JSON.parse(raw);
         const validation = this.validateConfig(parsed);
 
         if (validation.valid) {
           return parsed as HubConfig;
         } else {
-          console.error('[ConfigManager] Configuração em disco contém erros de validação:', validation.errors);
+          console.error('[ConfigManager] Configuração em ~/.config/hubai contém erros de validação:', validation.errors);
           console.warn('[ConfigManager] Carregando configuração padrão segura.');
         }
       } catch (err) {
-        console.error('[ConfigManager] Erro ao ler JSON de configuração:', err);
+        console.error('[ConfigManager] Erro ao ler JSON de configuração em ~/.config/hubai:', err);
       }
     }
 
-    // Save initial clean default config
+    // 2. Migration: If ~/.config/hubai/hub-config.json does not exist, check legacy project data/hub-config.json
+    if (fs.existsSync(this.legacyConfigFile)) {
+      try {
+        const rawLegacy = fs.readFileSync(this.legacyConfigFile, 'utf-8');
+        const parsedLegacy = JSON.parse(rawLegacy);
+        const validation = this.validateConfig(parsedLegacy);
+
+        if (validation.valid) {
+          console.log('[ConfigManager] Migrando configuração existente de data/hub-config.json para ~/.config/hubai/hub-config.json...');
+          this.saveConfig(parsedLegacy as HubConfig);
+          return parsedLegacy as HubConfig;
+        }
+      } catch (legacyErr) {
+        console.warn('[ConfigManager] Erro ao tentar migrar configuração legada:', legacyErr);
+      }
+    }
+
+    // 3. Fallback: Save initial clean default config to ~/.config/hubai/hub-config.json
     this.saveConfig(defaultHubConfig);
     return defaultHubConfig;
   }
@@ -164,7 +207,7 @@ export class ConfigManager {
   }
 
   public saveConfig(newConfig: HubConfig): { success: boolean; errors?: string[] } {
-    this.ensureDataDir();
+    this.ensureConfigDir();
     const validation = this.validateConfig(newConfig);
 
     if (!validation.valid) {
@@ -174,10 +217,10 @@ export class ConfigManager {
 
     try {
       this.config = newConfig;
-      fs.writeFileSync(CONFIG_FILE, JSON.stringify(newConfig, null, 2), 'utf-8');
+      fs.writeFileSync(this.configFile, JSON.stringify(newConfig, null, 2), 'utf-8');
       return { success: true };
     } catch (err: any) {
-      console.error('[ConfigManager] Falha ao escrever configuração no disco:', err);
+      console.error('[ConfigManager] Falha ao escrever configuração no disco em', this.configFile, err);
       return { success: false, errors: [err.message] };
     }
   }

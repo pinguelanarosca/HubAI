@@ -1,31 +1,57 @@
-import React, { useState } from 'react';
-import { HubConfig, HubAccount, AIProvider, DetectedProfile } from '../types.js';
-import { saveHubConfig, resetHubConfig, fetchSystemProfiles } from '../services/api.js';
+import React, { useState, useEffect } from 'react';
 import {
   Settings,
+  RefreshCw,
   Plus,
   Trash2,
-  Edit2,
-  RefreshCw,
-  Folder,
-  Shield,
-  Check,
+  CheckCircle2,
   AlertCircle,
+  AlertTriangle,
+  Folder,
+  Layers,
+  Sparkles,
+  Bot,
+  Brain,
+  Zap,
+  Globe,
+  Compass,
+  Code,
+  Cpu,
+  User,
+  Shield,
+  Briefcase,
+  Archive,
   Download,
-  Info
+  Check,
+  X
 } from '../utils/icons.js';
+import {
+  HubConfig,
+  HubAccount,
+  AIProvider,
+  DetectedProfile,
+  ProfileSyncResult,
+  ProfileSyncMatch,
+  ProfileImportBinding,
+  BrowserVariant
+} from '../types.js';
+import {
+  saveHubConfig,
+  resetHubConfig,
+  syncChromeAccounts,
+  importMatchedProfiles,
+  fetchBrowserVariants
+} from '../services/api.js';
 
 interface SettingsModalProps {
-  isOpen: boolean;
-  onClose: () => void;
   config: HubConfig;
+  onClose: () => void;
   onConfigSaved: (newConfig: HubConfig) => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
-  isOpen,
-  onClose,
   config,
+  onClose,
   onConfigSaved
 }) => {
   const [activeTab, setActiveTab] = useState<'accounts' | 'providers' | 'system'>('accounts');
@@ -33,24 +59,90 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [detectedProfiles, setDetectedProfiles] = useState<DetectedProfile[]>([]);
-  const [scanning, setScanning] = useState(false);
 
-  // Edit account state
-  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+  // Synchronization state
+  const [syncResult, setSyncResult] = useState<ProfileSyncResult | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [browserVariants, setBrowserVariants] = useState<BrowserVariant[]>([]);
+  const [showImportPreview, setShowImportPreview] = useState(false);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    fetchBrowserVariants()
+      .then(setBrowserVariants)
+      .catch((err) => console.warn('Erro ao carregar variantes de navegadores:', err));
+  }, []);
 
-  const handleScanProfiles = async () => {
-    setScanning(true);
+  const handleSyncChromeAccounts = async (targetDir?: string) => {
+    setSyncing(true);
+    setSyncError(null);
     try {
-      const data = await fetchSystemProfiles(localConfig.system.chromeUserDataDir);
-      setDetectedProfiles(data.detectedProfiles);
-    } catch (err) {
-      console.error('Erro ao buscar perfis:', err);
+      const result = await syncChromeAccounts(targetDir || localConfig.system.chromeUserDataDir);
+      setSyncResult(result);
+      if (result.browserVariants) {
+        setBrowserVariants(result.browserVariants);
+      }
+    } catch (err: any) {
+      setSyncError(err.message || 'Erro ao sincronizar perfis com o Google Chrome.');
     } finally {
-      setScanning(false);
+      setSyncing(false);
     }
+  };
+
+  const handleApplyDiscoveredProfiles = () => {
+    if (!syncResult || syncResult.matches.length === 0) return;
+
+    // Build the bindings according to priority (email -> name -> directory -> slot)
+    const bindings = syncResult.matches
+      .filter((m) => m.matchedAccountId && m.detectedProfile.exists)
+      .map((m) => {
+        const currentAcc = localConfig.accounts.find((a) => a.id === m.matchedAccountId);
+        return {
+          accountId: m.matchedAccountId!,
+          profileDir: m.detectedProfile.dirName,
+          userDataDir: m.detectedProfile.userDataDir,
+          name: m.detectedProfile.displayName || currentAcc?.name,
+          email: m.detectedProfile.email || currentAcc?.email
+        };
+      });
+
+    // Check for duplicate profile bindings in the batch
+    const seenDirs = new Set<string>();
+    const safeBindings: ProfileImportBinding[] = [];
+    for (const b of bindings) {
+      const key = `${b.userDataDir || ''}::${b.profileDir}`;
+      if (!seenDirs.has(key)) {
+        seenDirs.add(key);
+        safeBindings.push(b);
+      }
+    }
+
+    if (safeBindings.length === 0) {
+      setSyncError('Nenhuma associação válida encontrada para importar.');
+      return;
+    }
+
+    // Apply to local config state
+    const updatedAccounts = localConfig.accounts.map((acc) => {
+      const matched = safeBindings.find((b) => b.accountId === acc.id);
+      if (!matched) return acc;
+      return {
+        ...acc,
+        chromeProfileDir: matched.profileDir,
+        userDataDir: matched.userDataDir,
+        name: matched.name || acc.name,
+        email: matched.email || acc.email
+      };
+    });
+
+    setLocalConfig({
+      ...localConfig,
+      accounts: updatedAccounts
+    });
+
+    setShowImportPreview(false);
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 3000);
   };
 
   const handleSaveAll = async () => {
@@ -70,33 +162,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleReset = async () => {
-    if (confirm('Tem certeza que deseja restaurar as configurações padrão com as 9 contas e provedores?')) {
-      setSaving(true);
+    if (window.confirm('Tem certeza que deseja redefinir todas as configurações para o padrão de fábrica?')) {
       try {
         const reset = await resetHubConfig();
         setLocalConfig(reset);
         onConfigSaved(reset);
-        setSaveSuccess(true);
-        setTimeout(() => setSaveSuccess(false), 2000);
-      } finally {
-        setSaving(false);
+      } catch (err: any) {
+        setSaveError(err.message);
       }
     }
   };
 
-  // Account editing handlers
   const handleUpdateAccount = (id: string, updates: Partial<HubAccount>) => {
-    setLocalConfig(prev => ({
+    setLocalConfig((prev) => ({
       ...prev,
-      accounts: prev.accounts.map(acc => (acc.id === id ? { ...acc, ...updates } : acc))
+      accounts: prev.accounts.map((a) => (a.id === id ? { ...a, ...updates } : a))
     }));
   };
 
-  // Provider handlers
   const handleUpdateProvider = (id: string, updates: Partial<AIProvider>) => {
-    setLocalConfig(prev => ({
+    setLocalConfig((prev) => ({
       ...prev,
-      providers: prev.providers.map(p => (p.id === id ? { ...p, ...updates } : p))
+      providers: prev.providers.map((p) => (p.id === id ? { ...p, ...updates } : p))
     }));
   };
 
@@ -104,45 +191,50 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const newId = `prov_${Date.now()}`;
     const newProv: AIProvider = {
       id: newId,
-      name: 'Nova Plataforma de IA',
-      shortName: 'Nova IA',
-      defaultUrl: 'https://exemplo.ai',
+      name: 'Novo Provedor',
+      shortName: 'Novo',
+      defaultUrl: 'https://',
       category: 'general',
       icon: 'Bot',
-      description: 'Plataforma customizada de IA',
+      description: 'Plataforma de inteligência artificial',
       enabled: true,
       order: localConfig.providers.length + 1
     };
-    setLocalConfig(prev => ({
+    setLocalConfig((prev) => ({
       ...prev,
       providers: [...prev.providers, newProv]
     }));
   };
 
   const handleDeleteProvider = (id: string) => {
-    if (confirm('Deseja remover este provedor?')) {
-      setLocalConfig(prev => ({
-        ...prev,
-        providers: prev.providers.filter(p => p.id !== id)
-      }));
+    if (localConfig.providers.length <= 1) {
+      alert('É necessário manter pelo menos 1 provedor configurado.');
+      return;
     }
+    setLocalConfig((prev) => ({
+      ...prev,
+      providers: prev.providers.filter((p) => p.id !== id)
+    }));
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
       <div className="bg-neutral-900 border border-neutral-800 rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
-        {/* Header */}
+        {/* Modal Header */}
         <div className="px-6 py-4 border-b border-neutral-800 flex items-center justify-between bg-neutral-950">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center">
-              <Settings className="w-4 h-4 text-neutral-300" />
+            <div className="w-8 h-8 rounded-lg bg-neutral-800 flex items-center justify-center text-neutral-300">
+              <Settings className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-neutral-100">
-                Configurações do Hub
+              <h2 className="text-sm font-semibold text-neutral-100 flex items-center gap-2">
+                <span>Configurações do AI Account Hub</span>
+                <span className="text-[10px] bg-neutral-800 border border-neutral-700 px-1.5 py-0.5 rounded text-neutral-400 font-mono">
+                  ~/.config/hubai
+                </span>
               </h2>
               <span className="text-xs text-neutral-400 font-normal">
-                Gerenciamento de contas, perfis Chrome e provedores
+                Gerencie contas do Chrome, plataformas de IA e caminhos no Linux
               </span>
             </div>
           </div>
@@ -151,10 +243,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <button
               onClick={handleSaveAll}
               disabled={saving}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors shadow-sm disabled:opacity-50"
             >
-              {saveSuccess ? <Check className="w-3.5 h-3.5" /> : null}
-              <span>{saveSuccess ? 'Salvo com Sucesso!' : saving ? 'Salvando...' : 'Salvar Alterações'}</span>
+              {saving ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : saveSuccess ? (
+                <Check className="w-3.5 h-3.5 text-white" />
+              ) : null}
+              <span>{saving ? 'Validando...' : saveSuccess ? 'Salvo!' : 'Salvar Alterações'}</span>
             </button>
             <button
               onClick={onClose}
@@ -186,7 +282,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 : 'border-transparent text-neutral-400 hover:text-neutral-200'
             }`}
           >
-            9 Contas & Perfis Chrome ({localConfig.accounts.length})
+            Sincronização & Contas Chrome ({localConfig.accounts.length})
           </button>
           <button
             onClick={() => setActiveTab('providers')}
@@ -211,50 +307,150 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Tab Contents */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div className="flex-1 overflow-y-auto p-6 space-y-5">
           {/* TAB 1: ACCOUNTS */}
           {activeTab === 'accounts' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-xs font-semibold text-neutral-200">
-                    Mapeamento das 9 Contas aos Perfis do Chrome
-                  </h3>
-                  <p className="text-xs text-neutral-400 mt-0.5">
-                    Cada conta é vinculada com isolamento estrito ao diretório de perfil especificado.
-                  </p>
+            <div className="space-y-5">
+              {/* Synchronization Banner */}
+              <div className="p-4 bg-neutral-950 border border-neutral-800 rounded-xl space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-xs font-semibold text-neutral-200 flex items-center gap-2">
+                      <Shield className="w-4 h-4 text-emerald-400" />
+                      <span>Sincronizar Contas Reais do Chrome</span>
+                    </h3>
+                    <p className="text-xs text-neutral-400 mt-0.5">
+                      Descobre perfis existentes no Linux lendo metadados locais de <code className="text-neutral-300">Local State</code> e <code className="text-neutral-300">Preferences</code> sem exigir novo login.
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => handleSyncChromeAccounts()}
+                    disabled={syncing}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium transition-colors shadow-sm disabled:opacity-50 shrink-0"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
+                    <span>{syncing ? 'Descobrindo Perfis...' : 'Sincronizar Contas do Chrome'}</span>
+                  </button>
                 </div>
-                <button
-                  onClick={handleScanProfiles}
-                  disabled={scanning}
-                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-neutral-300 bg-neutral-800 hover:bg-neutral-700 rounded-md transition-colors"
-                >
-                  <RefreshCw className={`w-3 h-3 ${scanning ? 'animate-spin' : ''}`} />
-                  <span>Escanear Perfis do Disco</span>
-                </button>
+
+                {/* Browser Variants Quick Selector */}
+                {browserVariants.length > 0 && (
+                  <div className="pt-2 border-t border-neutral-850 flex flex-wrap items-center gap-2">
+                    <span className="text-[11px] text-neutral-500 font-medium">Navegadores no Linux:</span>
+                    {browserVariants.map((b) => (
+                      <button
+                        key={b.id}
+                        onClick={() => {
+                          setLocalConfig((prev) => ({
+                            ...prev,
+                            system: { ...prev.system, chromeUserDataDir: b.userDataDir }
+                          }));
+                          handleSyncChromeAccounts(b.userDataDir);
+                        }}
+                        className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${
+                          b.exists
+                            ? 'bg-neutral-900 border-neutral-700 text-neutral-300 hover:border-neutral-500'
+                            : 'bg-neutral-950 border-neutral-850 text-neutral-600 opacity-60'
+                        }`}
+                        title={b.userDataDir}
+                      >
+                        {b.name} {b.exists ? `(${b.profileCount} perfis)` : '(não instalado)'}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {detectedProfiles.length > 0 && (
-                <div className="p-3 bg-neutral-950 border border-neutral-800 rounded-lg text-xs space-y-1.5">
-                  <div className="text-neutral-400 font-medium">
-                    Perfis detectados no sistema ({detectedProfiles.length}):
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {detectedProfiles.map((p) => (
-                      <span
-                        key={p.dirName}
-                        className="px-2 py-0.5 bg-neutral-900 border border-neutral-700 rounded font-mono text-[11px] text-neutral-300"
-                        title={p.fullPath}
-                      >
-                        {p.dirName} {p.email ? `(${p.email})` : ''}
+              {/* Sync Error */}
+              {syncError && (
+                <div className="p-3 bg-amber-950/40 border border-amber-800 text-amber-300 rounded-lg text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{syncError}</span>
+                </div>
+              )}
+
+              {/* Sync Results & Import Action */}
+              {syncResult && (
+                <div className="p-4 bg-neutral-950 border border-neutral-800 rounded-xl space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-850 pb-3">
+                    <div>
+                      <h4 className="text-xs font-semibold text-neutral-200">
+                        Perfis Reais Descobertos ({syncResult.stats.totalDetected})
+                      </h4>
+                      <span className="text-[11px] text-neutral-400">
+                        {syncResult.stats.matchedCount} perfis correspondem às suas contas do Hub.
+                        {syncResult.stats.unmatchedDetectedCount > 0 &&
+                          ` (${syncResult.stats.unmatchedDetectedCount} perfis livres encontrados no Chrome)`}
                       </span>
-                    ))}
+                    </div>
+
+                    <button
+                      onClick={handleApplyDiscoveredProfiles}
+                      disabled={syncResult.matches.length === 0}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Importar perfis encontrados</span>
+                    </button>
+                  </div>
+
+                  {/* Discovered Profiles Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                    {syncResult.detectedProfiles.map((p) => {
+                      const match = syncResult.matches.find((m) => m.detectedProfile.dirName === p.dirName);
+                      return (
+                        <div
+                          key={p.dirName}
+                          className="p-3 rounded-lg bg-neutral-900/90 border border-neutral-800 space-y-1.5 text-xs"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-neutral-100 truncate">
+                              {p.displayName || p.dirName}
+                            </span>
+                            <span
+                              className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                                p.isLocked
+                                  ? 'bg-amber-950/60 border-amber-800 text-amber-300'
+                                  : 'bg-emerald-950/60 border-emerald-800 text-emerald-400'
+                              }`}
+                            >
+                              {p.isLocked ? 'Em uso' : 'Detectado'}
+                            </span>
+                          </div>
+
+                          <div className="text-[11px] text-neutral-400 font-mono truncate">
+                            {p.email || 'Email não associado no perfil'}
+                          </div>
+
+                          <div className="text-[10px] text-neutral-500 font-mono truncate" title={p.fullPath}>
+                            {p.dirName} ({p.browserType})
+                          </div>
+
+                          {match && match.currentAccount && (
+                            <div className="pt-1 border-t border-neutral-800 text-[10px] text-indigo-400 flex items-center justify-between">
+                              <span>Sugerido para: <strong>{match.currentAccount.name}</strong></span>
+                              <span className="capitalize opacity-80 font-mono">({match.matchType})</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
 
               {/* Accounts List */}
               <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-semibold text-neutral-300">
+                    Contas do Hub & Vinculação Determinística ({localConfig.accounts.length})
+                  </h3>
+                  <span className="text-[11px] text-neutral-500">
+                    Isolamento por: userDataDir + profileDirectory
+                  </span>
+                </div>
+
                 {localConfig.accounts.map((acc, index) => (
                   <div
                     key={acc.id}
@@ -285,11 +481,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         </div>
                       </div>
 
-                      {/* Chrome Profile Dir assignment */}
+                      {/* Chrome Profile Dir & custom User Data Dir assignment */}
                       <div className="flex items-center gap-2">
                         <div className="text-right">
                           <label className="text-[10px] uppercase font-semibold text-neutral-500 block">
-                            Diretório do Perfil Chrome
+                            Pasta do Perfil
                           </label>
                           <input
                             type="text"
@@ -317,14 +513,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                     </div>
 
-                    {/* Notes & Custom description */}
-                    <div>
+                    {/* Custom User Data Dir (optional per account) & Notes */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        value={acc.userDataDir || ''}
+                        onChange={(e) => handleUpdateAccount(acc.id, { userDataDir: e.target.value || undefined })}
+                        placeholder="userDataDir customizado (opcional, padrão do sistema se vazio)"
+                        className="text-[11px] font-mono text-neutral-400 bg-neutral-900/60 border border-neutral-800/80 rounded px-2 py-1 focus:outline-none focus:border-neutral-700"
+                      />
                       <input
                         type="text"
                         value={acc.notes || ''}
                         onChange={(e) => handleUpdateAccount(acc.id, { notes: e.target.value })}
-                        placeholder="Observações de uso (ex: Conta de trabalho principal)"
-                        className="w-full text-xs text-neutral-400 bg-neutral-900/60 border border-neutral-800/80 rounded px-2.5 py-1 focus:outline-none focus:border-neutral-700"
+                        placeholder="Observações da conta"
+                        className="text-xs text-neutral-400 bg-neutral-900/60 border border-neutral-800/80 rounded px-2 py-1 focus:outline-none focus:border-neutral-700"
                       />
                     </div>
                   </div>
@@ -448,81 +651,80 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="space-y-4">
                 <div className="p-4 bg-neutral-950 border border-neutral-800 rounded-xl space-y-2">
                   <label className="text-xs font-semibold text-neutral-300 block">
-                    Comando / Executável do Navegador
+                    Comando do Executável do Navegador
                   </label>
-                  <p className="text-[11px] text-neutral-500">
-                    Nome ou caminho do executável no PATH (ex: <code>google-chrome</code>,{' '}
-                    <code>google-chrome-stable</code>, <code>chromium</code>, <code>brave-browser</code>).
-                  </p>
                   <input
                     type="text"
                     value={localConfig.system.browserCommand}
                     onChange={(e) =>
-                      setLocalConfig(prev => ({
+                      setLocalConfig((prev) => ({
                         ...prev,
                         system: { ...prev.system, browserCommand: e.target.value }
                       }))
                     }
-                    className="w-full text-xs font-mono text-neutral-200 bg-neutral-900 border border-neutral-700 rounded px-3 py-1.5 focus:outline-none focus:border-neutral-500"
+                    placeholder="google-chrome, google-chrome-stable, chromium..."
+                    className="w-full text-xs font-mono text-neutral-200 bg-neutral-900 border border-neutral-700 rounded-lg p-2.5 focus:outline-none focus:border-neutral-500"
                   />
+                  <span className="text-[11px] text-neutral-500 block">
+                    Binário que será executado pelo Linux (verificado no PATH ou caminho absoluto).
+                  </span>
                 </div>
 
                 <div className="p-4 bg-neutral-950 border border-neutral-800 rounded-xl space-y-2">
                   <label className="text-xs font-semibold text-neutral-300 block">
-                    Diretório Base de Perfis (User Data Directory)
+                    Diretório Base de Perfis Chrome (chromeUserDataDir)
                   </label>
-                  <p className="text-[11px] text-neutral-500">
-                    No Linux padrão: <code>~/.config/google-chrome</code> ou{' '}
-                    <code>~/.config/chromium</code>.
-                  </p>
                   <input
                     type="text"
                     value={localConfig.system.chromeUserDataDir}
                     onChange={(e) =>
-                      setLocalConfig(prev => ({
+                      setLocalConfig((prev) => ({
                         ...prev,
                         system: { ...prev.system, chromeUserDataDir: e.target.value }
                       }))
                     }
-                    className="w-full text-xs font-mono text-neutral-200 bg-neutral-900 border border-neutral-700 rounded px-3 py-1.5 focus:outline-none focus:border-neutral-500"
+                    placeholder="~/.config/google-chrome"
+                    className="w-full text-xs font-mono text-neutral-200 bg-neutral-900 border border-neutral-700 rounded-lg p-2.5 focus:outline-none focus:border-neutral-500"
                   />
+                  <span className="text-[11px] text-neutral-500 block">
+                    Caminho padrão no Linux: <code className="text-neutral-400">~/.config/google-chrome</code> ou <code className="text-neutral-400">~/.config/chromium</code>.
+                  </span>
                 </div>
 
-                <div className="p-4 bg-neutral-950 border border-neutral-800 rounded-xl flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-semibold text-neutral-300 block">
-                      Abrir sempre em Nova Janela (--new-window)
-                    </span>
-                    <span className="text-[11px] text-neutral-500">
-                      Garante que cada sessão apareça claramente separada na barra de tarefas do Linux.
-                    </span>
+                <div className="p-4 bg-neutral-950 border border-neutral-800 rounded-xl space-y-3">
+                  <label className="flex items-center gap-2 text-xs text-neutral-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={localConfig.system.openInNewWindow}
+                      onChange={(e) =>
+                        setLocalConfig((prev) => ({
+                          ...prev,
+                          system: { ...prev.system, openInNewWindow: e.target.checked }
+                        }))
+                      }
+                      className="rounded bg-neutral-900 border-neutral-700 text-emerald-500"
+                    />
+                    <span className="font-medium">Abrir sempre em uma nova janela independente (--new-window)</span>
+                  </label>
+
+                  <div className="text-[11px] text-neutral-500">
+                    Garante janelas separadas para cada perfil em ambientes de desktop multimonitor ou áreas de trabalho virtuais no Linux.
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={localConfig.system.openInNewWindow}
-                    onChange={(e) =>
-                      setLocalConfig(prev => ({
-                        ...prev,
-                        system: { ...prev.system, openInNewWindow: e.target.checked }
-                      }))
-                    }
-                    className="rounded bg-neutral-900 border-neutral-700 text-emerald-500"
-                  />
                 </div>
 
-                {/* Reset to defaults */}
-                <div className="p-4 bg-neutral-950 border border-rose-950/60 rounded-xl flex items-center justify-between">
+                {/* Reset Section */}
+                <div className="pt-4 border-t border-neutral-800/80 flex items-center justify-between">
                   <div>
-                    <span className="text-xs font-semibold text-rose-300 block">
+                    <span className="text-xs text-neutral-300 font-medium block">
                       Restaurar Padrões de Fábrica
                     </span>
-                    <span className="text-[11px] text-neutral-500">
-                      Restaura as 9 contas predefinidas e todos os 8 provedores de IA recomendados.
+                    <span className="text-[11px] text-neutral-500 block">
+                      Reverte as contas e provedores para as configurações padrão do HubAI.
                     </span>
                   </div>
                   <button
                     onClick={handleReset}
-                    className="px-3 py-1.5 text-xs text-rose-300 hover:text-white bg-rose-950/60 hover:bg-rose-900 border border-rose-800 rounded-lg transition-colors"
+                    className="px-3 py-1.5 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 border border-rose-900/60 rounded-lg transition-colors"
                   >
                     Restaurar Padrões
                   </button>

@@ -4,8 +4,8 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { HubConfig, AIProvider, HubAccount, LaunchResult, DiagnosticReport } from './types.js';
-import { fetchHubConfig, saveHubConfig, launchPlatform, runDiagnostics } from './services/api.js';
+import { HubConfig, AIProvider, HubAccount, LaunchResult, DiagnosticReport, UpdateStatus } from './types.js';
+import { fetchHubConfig, saveHubConfig, launchPlatform, runDiagnostics, fetchUpdateStatus } from './services/api.js';
 import { Header } from './components/Header.js';
 import { Sidebar } from './components/Sidebar.js';
 import { ProviderBanner } from './components/ProviderBanner.js';
@@ -14,6 +14,7 @@ import { DiagnosticModal } from './components/DiagnosticModal.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { LinuxShortcutsModal } from './components/LinuxShortcutsModal.js';
 import { EditAccountModal } from './components/EditAccountModal.js';
+import { UpdateModal } from './components/UpdateModal.js';
 import { LaunchNotification } from './components/LaunchNotification.js';
 import { RefreshCw, AlertCircle } from './utils/icons.js';
 
@@ -31,10 +32,12 @@ export default function App() {
   const [isDiagnosticOpen, setIsDiagnosticOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [isUpdateOpen, setIsUpdateOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<HubAccount | null>(null);
 
-  // Diagnostic state
+  // Diagnostics & Updates
   const [diagnosticReport, setDiagnosticReport] = useState<DiagnosticReport | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
 
   useEffect(() => {
     loadInitialData();
@@ -60,9 +63,17 @@ export default function App() {
       } catch (diagErr) {
         console.warn('Initial diagnostics background check:', diagErr);
       }
+
+      // Check update status in background
+      try {
+        const upd = await fetchUpdateStatus(false);
+        setUpdateStatus(upd);
+      } catch (updErr) {
+        console.warn('Initial update check:', updErr);
+      }
     } catch (err: any) {
       console.error('Failed to load hub:', err);
-      setError(err.message || 'Falha ao inicializar o AI Account Hub');
+      setError(err.message || 'Falha ao inicializar o HubAI');
     } finally {
       setLoading(false);
     }
@@ -98,27 +109,28 @@ export default function App() {
     }
   };
 
-  const handleSaveAccount = async (updated: HubAccount) => {
+  const handleSaveAccount = async (updatedAccount: HubAccount) => {
     if (!config) return;
-    const updatedAccounts = config.accounts.map(a => (a.id === updated.id ? updated : a));
-    const newConfig: HubConfig = {
-      ...config,
-      accounts: updatedAccounts
-    };
+    const updatedAccounts = config.accounts.map(a =>
+      a.id === updatedAccount.id ? updatedAccount : a
+    );
+    const newConfig = { ...config, accounts: updatedAccounts };
+
     try {
       const saved = await saveHubConfig(newConfig);
       setConfig(saved);
-    } catch (err) {
-      console.error('Falha ao salvar conta:', err);
+      setEditingAccount(null);
+    } catch (err: any) {
+      alert(`Erro ao salvar conta: ${err.message}`);
     }
   };
 
   if (loading) {
     return (
       <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center text-neutral-400 gap-3">
-        <RefreshCw className="w-7 h-7 animate-spin text-emerald-500" />
+        <RefreshCw className="w-6 h-6 animate-spin text-emerald-500" />
         <span className="text-xs font-mono tracking-wider uppercase">
-          Carregando AI Account Hub...
+          Carregando HubAI...
         </span>
       </div>
     );
@@ -157,6 +169,8 @@ export default function App() {
         onOpenDiagnostics={() => setIsDiagnosticOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenShortcuts={() => setIsShortcutsOpen(true)}
+        onOpenUpdate={() => setIsUpdateOpen(true)}
+        hasUpdate={updateStatus?.hasUpdate}
         diagnosticStatus={diagnosticReport?.overallStatus}
       />
 
@@ -202,20 +216,32 @@ export default function App() {
       />
 
       {/* Comprehensive 5-Point Diagnostic Modal */}
-      <DiagnosticModal
-        isOpen={isDiagnosticOpen}
-        onClose={() => setIsDiagnosticOpen(false)}
-        initialReport={diagnosticReport}
-        onReportUpdated={(rep) => setDiagnosticReport(rep)}
-      />
+      {isDiagnosticOpen && (
+        <DiagnosticModal
+          report={diagnosticReport}
+          onClose={() => setIsDiagnosticOpen(false)}
+          onRefresh={async () => {
+            const diag = await runDiagnostics();
+            setDiagnosticReport(diag);
+          }}
+        />
+      )}
 
       {/* Settings Modal */}
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        config={config}
-        onConfigSaved={(newConf) => setConfig(newConf)}
-      />
+      {isSettingsOpen && (
+        <SettingsModal
+          config={config}
+          onClose={() => setIsSettingsOpen(false)}
+          onConfigSaved={(newConf) => setConfig(newConf)}
+        />
+      )}
+
+      {/* Update Modal */}
+      {isUpdateOpen && (
+        <UpdateModal
+          onClose={() => setIsUpdateOpen(false)}
+        />
+      )}
 
       {/* Linux Shortcuts & Bash Script Modal */}
       <LinuxShortcutsModal

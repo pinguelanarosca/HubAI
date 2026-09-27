@@ -1,43 +1,42 @@
 import React, { useState } from 'react';
-import { DiagnosticReport } from '../types.js';
-import { runDiagnostics } from '../services/api.js';
 import {
+  Shield,
   CheckCircle2,
   AlertTriangle,
   AlertCircle,
   RefreshCw,
   Terminal,
-  Shield,
-  ExternalLink
+  ExternalLink,
+  Layers,
+  Folder,
+  User
 } from '../utils/icons.js';
+import { DiagnosticReport } from '../types.js';
+import { runDiagnostics } from '../services/api.js';
 
 interface DiagnosticModalProps {
-  isOpen: boolean;
+  report: DiagnosticReport | null;
   onClose: () => void;
-  initialReport: DiagnosticReport | null;
-  onReportUpdated: (report: DiagnosticReport) => void;
+  onRefresh: () => void;
 }
 
 export const DiagnosticModal: React.FC<DiagnosticModalProps> = ({
-  isOpen,
+  report: initialReport,
   onClose,
-  initialReport,
-  onReportUpdated
+  onRefresh
 }) => {
   const [report, setReport] = useState<DiagnosticReport | null>(initialReport);
   const [loading, setLoading] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
-
-  if (!isOpen) return null;
 
   const handleRunDiagnostic = async () => {
     setLoading(true);
     try {
       const newReport = await runDiagnostics();
       setReport(newReport);
-      onReportUpdated(newReport);
+      onRefresh();
     } catch (err) {
-      console.error('Falha ao rodar diagnóstico:', err);
+      console.error('Erro ao executar diagnóstico:', err);
     } finally {
       setLoading(false);
     }
@@ -70,7 +69,7 @@ export const DiagnosticModal: React.FC<DiagnosticModalProps> = ({
                 Diagnóstico de Integridade do Sistema Linux
               </h2>
               <span className="text-xs text-neutral-400 font-normal">
-                Verificação ponta a ponta dos 5 requisitos de perfis Chrome, binários e isolamento
+                Auditoria em tempo real de perfis reais do Chrome, executáveis e integridade de isolamento
               </span>
             </div>
           </div>
@@ -111,12 +110,12 @@ export const DiagnosticModal: React.FC<DiagnosticModalProps> = ({
                   {getStatusIcon(report.overallStatus)}
                   <div>
                     <h3 className="text-sm font-semibold">
-                      {report.overallStatus === 'passed' && 'Sistema Pronto & Perfis Validados'}
-                      {report.overallStatus === 'warning' && 'Sistema Operacional com Avisos'}
-                      {report.overallStatus === 'failed' && 'Falhas Detectadas no Ambiente'}
+                      {report.overallStatus === 'passed' && 'Perfis e Sistema Validados com Sucesso'}
+                      {report.overallStatus === 'warning' && 'Sistema Operacional com Alertas / Avisos'}
+                      {report.overallStatus === 'failed' && 'Falhas Detectadas no Ambiente ou Perfis'}
                     </h3>
-                    <p className="text-xs opacity-80 mt-0.5">
-                      Verificado em {new Date(report.timestamp).toLocaleTimeString()} · Isolamento de sessão ativo.
+                    <p className="text-xs opacity-80 mt-0.5 font-mono">
+                      Verificado em {new Date(report.timestamp).toLocaleTimeString()} · Base: {report.summary?.userDataDirUsed || '~/.config/google-chrome'}
                     </p>
                   </div>
                 </div>
@@ -130,6 +129,43 @@ export const DiagnosticModal: React.FC<DiagnosticModalProps> = ({
                 </button>
               </div>
 
+              {/* Summary Stats Grid */}
+              {report.summary && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="bg-neutral-950 border border-neutral-800/80 rounded-lg p-3">
+                    <span className="text-[11px] text-neutral-400 block font-medium">Perfis no Disco</span>
+                    <span className="text-lg font-bold text-neutral-100 font-mono">
+                      {report.summary.discoveredProfilesCount}
+                    </span>
+                    <span className="text-[10px] text-neutral-500 block mt-0.5">descobertos em tempo real</span>
+                  </div>
+
+                  <div className="bg-neutral-950 border border-neutral-800/80 rounded-lg p-3">
+                    <span className="text-[11px] text-neutral-400 block font-medium">Contas Vinculadas</span>
+                    <span className="text-lg font-bold text-emerald-400 font-mono">
+                      {report.summary.linkedAccountsCount}
+                    </span>
+                    <span className="text-[10px] text-neutral-500 block mt-0.5">com perfil real existente</span>
+                  </div>
+
+                  <div className="bg-neutral-950 border border-neutral-800/80 rounded-lg p-3">
+                    <span className="text-[11px] text-neutral-400 block font-medium">Contas Incompletas</span>
+                    <span className={`text-lg font-bold font-mono ${report.summary.unlinkedAccountsCount > 0 ? 'text-rose-400' : 'text-neutral-300'}`}>
+                      {report.summary.unlinkedAccountsCount}
+                    </span>
+                    <span className="text-[10px] text-neutral-500 block mt-0.5">perfil ausente no disco</span>
+                  </div>
+
+                  <div className="bg-neutral-950 border border-neutral-800/80 rounded-lg p-3">
+                    <span className="text-[11px] text-neutral-400 block font-medium">Perfis Livres</span>
+                    <span className="text-lg font-bold text-neutral-200 font-mono">
+                      {report.summary.unlinkedProfilesCount}
+                    </span>
+                    <span className="text-[10px] text-neutral-500 block mt-0.5">disponíveis para vincular</span>
+                  </div>
+                </div>
+              )}
+
               {/* Execution Logs Drawer */}
               {showLogs && (
                 <div className="bg-neutral-950 border border-neutral-800 rounded-lg p-3 font-mono text-[11px] text-neutral-300 max-h-48 overflow-y-auto">
@@ -142,9 +178,9 @@ export const DiagnosticModal: React.FC<DiagnosticModalProps> = ({
                 </div>
               )}
 
-              {/* 5 Core Verification Cards */}
+              {/* Core Verification Cards */}
               <div className="space-y-4">
-                {/* 1 & 2: Browser & Chrome Directory */}
+                {/* Browser & Chrome Directory */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Browser Binary */}
                   <div className="bg-neutral-950 border border-neutral-800/80 rounded-xl p-4">
@@ -152,7 +188,7 @@ export const DiagnosticModal: React.FC<DiagnosticModalProps> = ({
                       <div className="flex items-center gap-2">
                         {getStatusIcon(report.browserCheck.status)}
                         <span className="text-xs font-semibold text-neutral-200">
-                          3. Inicialização do Navegador
+                          1. Executável do Navegador
                         </span>
                       </div>
                       <span className="text-[11px] font-mono uppercase text-neutral-500">
@@ -175,7 +211,7 @@ export const DiagnosticModal: React.FC<DiagnosticModalProps> = ({
                       <div className="flex items-center gap-2">
                         {getStatusIcon(report.userDataDirCheck.status)}
                         <span className="text-xs font-semibold text-neutral-200">
-                          2. Diretório de Dados Chrome
+                          2. Diretório Base de Perfis
                         </span>
                       </div>
                       <span className="text-[11px] font-mono uppercase text-neutral-500">
@@ -193,13 +229,13 @@ export const DiagnosticModal: React.FC<DiagnosticModalProps> = ({
                   </div>
                 </div>
 
-                {/* 5: Isolation & Mapping Integrity */}
+                {/* Isolation & Mapping Integrity */}
                 <div className="bg-neutral-950 border border-neutral-800/80 rounded-xl p-4">
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-2">
                       {getStatusIcon(report.isolationCheck.status)}
                       <span className="text-xs font-semibold text-neutral-200">
-                        5. Integridade do Isolamento (Conta → Perfil Chrome)
+                        3. Integridade do Isolamento (Conta → Perfil Chrome)
                       </span>
                     </div>
                     <span className="text-[11px] font-mono uppercase text-neutral-500">
@@ -214,66 +250,76 @@ export const DiagnosticModal: React.FC<DiagnosticModalProps> = ({
                   </p>
                 </div>
 
-                {/* 1 & 2: Detailed 9 Accounts & Chrome Profiles Table */}
+                {/* Accounts & Chrome Profiles Table */}
                 <div className="bg-neutral-950 border border-neutral-800/80 rounded-xl p-4">
                   <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-semibold text-neutral-200">
-                      1 & 2. Verificação das 9 Contas e Diretórios de Perfil
+                    <span className="text-xs font-semibold text-neutral-200 flex items-center gap-2">
+                      <User className="w-3.5 h-3.5 text-neutral-400" />
+                      <span>4. Auditoria Individual das Contas Configuradas ({report.accountsProfileCheck.length})</span>
                     </span>
-                    <span className="text-[11px] text-neutral-500 font-mono">
-                      {report.accountsProfileCheck.length} perfis validados
+                    <span className="text-[11px] text-neutral-500">
+                      Validação estrita no sistema de arquivos
                     </span>
                   </div>
 
-                  <div className="divide-y divide-neutral-900 border border-neutral-900 rounded-lg overflow-hidden">
-                    {report.accountsProfileCheck.map((item) => (
-                      <div
-                        key={item.accountId}
-                        className="px-3 py-2 flex items-center justify-between text-xs hover:bg-neutral-900/40 transition-colors"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          {getStatusIcon(item.status)}
-                          <span className="text-neutral-200 font-medium truncate">
-                            {item.accountName}
-                          </span>
-                          <span className="text-[11px] font-mono text-neutral-500">
-                            [{item.profileDir}]
-                          </span>
+                  <div className="divide-y divide-neutral-800/60 max-h-60 overflow-y-auto">
+                    {report.accountsProfileCheck.map(acc => (
+                      <div key={acc.accountId} className="py-2.5 flex items-start justify-between gap-3 text-xs">
+                        <div className="flex items-start gap-2.5 min-w-0">
+                          <div className="mt-0.5">{getStatusIcon(acc.status)}</div>
+                          <div className="min-w-0">
+                            <span className="font-semibold text-neutral-200 block truncate">
+                              {acc.accountName}
+                            </span>
+                            <span className="text-[11px] text-neutral-400 font-mono block">
+                              Perfil: {acc.profileDir} {acc.userDataDir ? `(${acc.userDataDir})` : ''}
+                            </span>
+                            <span className="text-[10px] text-neutral-500 mt-0.5 block leading-tight">
+                              {acc.message}
+                            </span>
+                          </div>
                         </div>
-                        <span className="text-[11px] text-neutral-400 truncate max-w-xs text-right">
-                          {item.message}
+
+                        <span
+                          className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded border shrink-0 ${
+                            acc.status === 'passed'
+                              ? 'bg-emerald-950/60 text-emerald-400 border-emerald-800/60'
+                              : acc.status === 'warning'
+                              ? 'bg-amber-950/60 text-amber-400 border-amber-800/60'
+                              : 'bg-rose-950/60 text-rose-400 border-rose-800/60'
+                          }`}
+                        >
+                          {acc.status}
                         </span>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                {/* 4: Target URLs Check */}
+                {/* AI Provider URLs */}
                 <div className="bg-neutral-950 border border-neutral-800/80 rounded-xl p-4">
                   <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-semibold text-neutral-200">
-                      4. Verificação de URLs dos Provedores de IA
-                    </span>
-                    <span className="text-[11px] text-neutral-500 font-mono">
-                      {report.urlCheck.length} provedores testados
+                    <span className="text-xs font-semibold text-neutral-200 flex items-center gap-2">
+                      <ExternalLink className="w-3.5 h-3.5 text-neutral-400" />
+                      <span>5. Validação de URLs dos Provedores ({report.urlCheck.length})</span>
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {report.urlCheck.map((item) => (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                    {report.urlCheck.map(u => (
                       <div
-                        key={item.providerId}
-                        className="p-2.5 rounded-lg bg-neutral-900/40 border border-neutral-900 flex items-center justify-between text-xs"
+                        key={u.providerId}
+                        className="p-2 rounded-lg bg-neutral-900/60 border border-neutral-800/60 flex items-center justify-between gap-2"
                       >
-                        <div className="flex items-center gap-2 min-w-0">
-                          {getStatusIcon(item.status)}
-                          <span className="text-neutral-300 font-medium truncate">
-                            {item.providerName}
+                        <div className="min-w-0">
+                          <span className="font-medium text-neutral-200 block truncate">
+                            {u.providerName}
+                          </span>
+                          <span className="text-[10px] text-neutral-500 font-mono truncate block">
+                            {u.url}
                           </span>
                         </div>
-                        <span className="text-[11px] text-neutral-500 font-mono truncate max-w-[140px]">
-                          {item.url.replace('https://', '')}
-                        </span>
+                        {getStatusIcon(u.status)}
                       </div>
                     ))}
                   </div>
@@ -281,11 +327,22 @@ export const DiagnosticModal: React.FC<DiagnosticModalProps> = ({
               </div>
             </>
           ) : (
-            <div className="p-12 text-center text-xs text-neutral-400">
-              <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-neutral-500" />
-              <span>Carregando dados de diagnóstico...</span>
+            <div className="text-center py-12">
+              <RefreshCw className="w-8 h-8 text-neutral-500 animate-spin mx-auto mb-3" />
+              <p className="text-sm text-neutral-400">Executando diagnósticos do sistema Linux...</p>
             </div>
           )}
+        </div>
+
+        {/* Modal Footer */}
+        <div className="px-6 py-3.5 border-t border-neutral-800 flex items-center justify-between bg-neutral-950 text-xs text-neutral-500">
+          <span>O HubAI nunca copia cookies, senhas ou tokens secretos.</span>
+          <button
+            onClick={onClose}
+            className="px-4 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg transition-colors font-medium"
+          >
+            Fechar Diagnóstico
+          </button>
         </div>
       </div>
     </div>

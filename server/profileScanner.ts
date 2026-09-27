@@ -2,7 +2,15 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { execSync } from 'child_process';
-import { DetectedProfile } from '../src/types.js';
+import {
+  DetectedProfile,
+  BrowserVariant,
+  ProfileSyncResult,
+  ProfileSyncMatch,
+  ProfileImportBinding,
+  HubAccount
+} from '../src/types.js';
+import { configManager, ConfigManager } from './configManager.js';
 
 export interface SystemBrowserInfo {
   availableBinaries: string[];
@@ -12,11 +20,19 @@ export interface SystemBrowserInfo {
   detectedProfiles: DetectedProfile[];
   singletonLockActive: boolean;
   singletonLockPid?: number;
+  browserVariants: BrowserVariant[];
 }
 
 export class ProfileScanner {
-  // Resolve tilde '~' in paths
+  private configManager: ConfigManager;
+
+  constructor(cfgManager?: ConfigManager) {
+    this.configManager = cfgManager || configManager;
+  }
+
+  // Resolve tilde '~' in paths safely
   public resolvePath(filePath: string): string {
+    if (!filePath) return path.join(os.homedir(), '.config', 'google-chrome');
     if (filePath.startsWith('~/') || filePath === '~') {
       return path.join(os.homedir(), filePath.slice(1));
     }
@@ -41,7 +57,7 @@ export class ProfileScanner {
           available.push(bin);
         }
       } catch {
-        // Not found, ignore
+        // Not found on PATH, ignore
       }
     }
 
@@ -49,8 +65,72 @@ export class ProfileScanner {
   }
 
   /**
+   * Detects known Chromium-based browser installations and directories on Linux.
+   */
+  public detectBrowserVariants(): BrowserVariant[] {
+    const home = os.homedir();
+    const candidates: { id: string; name: string; dir: string; binary: string }[] = [
+      {
+        id: 'chrome-stable',
+        name: 'Google Chrome',
+        dir: path.join(home, '.config', 'google-chrome'),
+        binary: 'google-chrome'
+      },
+      {
+        id: 'chrome-beta',
+        name: 'Google Chrome Beta',
+        dir: path.join(home, '.config', 'google-chrome-beta'),
+        binary: 'google-chrome-beta'
+      },
+      {
+        id: 'chrome-unstable',
+        name: 'Google Chrome Dev',
+        dir: path.join(home, '.config', 'google-chrome-unstable'),
+        binary: 'google-chrome-unstable'
+      },
+      {
+        id: 'chromium',
+        name: 'Chromium',
+        dir: path.join(home, '.config', 'chromium'),
+        binary: 'chromium'
+      },
+      {
+        id: 'brave',
+        name: 'Brave Browser',
+        dir: path.join(home, '.config', 'BraveSoftware', 'Brave-Browser'),
+        binary: 'brave-browser'
+      }
+    ];
+
+    return candidates.map(c => {
+      const exists = fs.existsSync(c.dir);
+      let profileCount = 0;
+      if (exists) {
+        try {
+          const entries = fs.readdirSync(c.dir, { withFileTypes: true });
+          profileCount = entries.filter(e =>
+            e.isDirectory() && (e.name === 'Default' || e.name.startsWith('Profile '))
+          ).length;
+        } catch {
+          profileCount = 0;
+        }
+      }
+
+      return {
+        id: c.id,
+        name: c.name,
+        userDataDir: c.dir,
+        binaryCommand: c.binary,
+        exists,
+        profileCount
+      };
+    });
+  }
+
+  /**
    * Scans exclusively real Chrome/Chromium user profiles on the host filesystem.
-   * NEVER creates mock directories or fake profiles.
+   * Reads metadata ONLY from Local State and Preferences files.
+   * NEVER extracts passwords, cookies, encryption keys, tokens, or session secrets.
    */
   public scanProfiles(customUserDataDir?: string): {
     targetDir: string;
@@ -78,7 +158,6 @@ export class ProfileScanner {
 
     if (fs.existsSync(lockPath)) {
       try {
-        // SingletonLock on Linux is typically a symlink to "hostname-PID"
         const linkTarget = fs.readlinkSync(lockPath);
         const parts = linkTarget.split('-');
         const pidStr = parts[parts.length - 1];
@@ -86,11 +165,9 @@ export class ProfileScanner {
         if (!isNaN(parsedPid) && parsedPid > 0) {
           singletonLockPid = parsedPid;
           try {
-            // Check if process is alive
             process.kill(parsedPid, 0);
             singletonLockActive = true;
           } catch {
-            // Stale lock file
             singletonLockActive = false;
           }
         } else {
@@ -103,6 +180,18 @@ export class ProfileScanner {
 
     const profiles: DetectedProfile[] = [];
 
+    // Determine browser label based on target directory
+    let browserType = 'Google Chrome';
+    if (targetDir.includes('chromium')) {
+      browserType = 'Chromium';
+    } else if (targetDir.includes('google-chrome-beta')) {
+      browserType = 'Google Chrome Beta';
+    } else if (targetDir.includes('google-chrome-unstable')) {
+      browserType = 'Google Chrome Dev';
+    } else if (targetDir.includes('Brave')) {
+      browserType = 'Brave Browser';
+    }
+
     try {
       const localStatePath = path.join(targetDir, 'Local State');
       let localStateInfoCache: Record<string, any> = {};
@@ -113,7 +202,7 @@ export class ProfileScanner {
           const data = JSON.parse(raw);
           localStateInfoCache = data?.profile?.info_cache || {};
         } catch {
-          // Ignore parse error on corrupted local state
+          // Ignore parse errors on corrupt file
         }
       }
 
@@ -122,38 +211,46 @@ export class ProfileScanner {
         if (!entry.isDirectory()) continue;
         const name = entry.name;
 
-        // Check if this directory corresponds to a real Chrome profile
+        // Verify if entry is a valid Chrome profile folder
         if (name === 'Default' || name.startsWith('Profile ') || localStateInfoCache[name]) {
           const fullPath = path.join(targetDir, name);
           const cached = localStateInfoCache[name] || {};
 
           let email = cached.user_name || undefined;
           let displayName = cached.name || undefined;
+          let gaiaId = cached.gaia_id || undefined;
+          let avatarIcon = cached.avatar_icon || undefined;
 
-          // Read Preferences file if available in the profile folder
+          // Read Preferences file if available in profile folder for additional display info
           const prefPath = path.join(fullPath, 'Preferences');
           if (fs.existsSync(prefPath)) {
             try {
               const pRaw = fs.readFileSync(prefPath, 'utf-8');
               const pData = JSON.parse(pRaw);
               displayName = displayName || pData?.profile?.name;
-              email = email || pData?.account_info?.[0]?.email;
+              email = email || pData?.account_info?.[0]?.email || pData?.sync?.account_id;
+              gaiaId = gaiaId || pData?.account_info?.[0]?.gaia_id;
             } catch {
               // Ignore preference parse errors
             }
           }
 
-          // Check if this specific profile directory has a lock file
+          // Check for profile lock
           const profileLock = path.join(fullPath, 'LOCK');
           const isLocked = fs.existsSync(profileLock) || singletonLockActive;
 
           profiles.push({
             dirName: name,
+            userDataDir: targetDir,
             fullPath,
             displayName: displayName || (name === 'Default' ? 'Default Profile' : name),
-            email,
+            email: email || undefined,
+            avatarIcon,
+            gaiaId,
             exists: true,
-            isLocked
+            isLocked,
+            lockPid: singletonLockPid,
+            browserType
           });
         }
       }
@@ -167,7 +264,7 @@ export class ProfileScanner {
         return numA - numB;
       });
     } catch (err) {
-      console.error('Error scanning real chrome profiles:', err);
+      console.error('[ProfileScanner] Erro ao escanear perfis reais do Chrome:', err);
     }
 
     return {
@@ -179,6 +276,218 @@ export class ProfileScanner {
     };
   }
 
+  /**
+   * Compares real discovered Chrome profiles with Hub accounts.
+   * Matches by:
+   * 1. Exact email (case-insensitive)
+   * 2. Display name (case-insensitive)
+   * 3. Directory name (exact)
+   */
+  public syncAccountsWithProfiles(customUserDataDir?: string, customAccounts?: HubAccount[], cfgMgr?: ConfigManager): ProfileSyncResult {
+    const mgr = cfgMgr || this.configManager;
+    const config = mgr.getConfig();
+    const currentAccounts = customAccounts || config.accounts;
+    const targetUserDir = customUserDataDir || config.system.chromeUserDataDir;
+    const scan = this.scanProfiles(targetUserDir);
+    const browserVariants = this.detectBrowserVariants();
+
+    const detectedProfiles = scan.profiles;
+
+    const matchedAccountIds = new Set<string>();
+    const matchedProfileDirs = new Set<string>();
+    const matches: ProfileSyncMatch[] = [];
+
+    // Priority 1: Match by Email (case-insensitive)
+    for (const detected of detectedProfiles) {
+      if (!detected.email) continue;
+      const detectedEmail = detected.email.toLowerCase().trim();
+
+      const candidateAccount = currentAccounts.find(acc => {
+        if (matchedAccountIds.has(acc.id)) return false;
+        return acc.email && acc.email.toLowerCase().trim() === detectedEmail;
+      });
+
+      if (candidateAccount) {
+        matchedAccountIds.add(candidateAccount.id);
+        matchedProfileDirs.add(detected.dirName);
+        matches.push({
+          detectedProfile: detected,
+          matchedAccountId: candidateAccount.id,
+          matchType: 'email',
+          confidence: 'high',
+          currentAccount: candidateAccount
+        });
+      }
+    }
+
+    // Priority 2: Match by Profile Name (case-insensitive)
+    for (const detected of detectedProfiles) {
+      if (matchedProfileDirs.has(detected.dirName)) continue;
+      if (!detected.displayName) continue;
+      const detectedName = detected.displayName.toLowerCase().trim();
+
+      const candidateAccount = currentAccounts.find(acc => {
+        if (matchedAccountIds.has(acc.id)) return false;
+        return acc.name && acc.name.toLowerCase().trim() === detectedName;
+      });
+
+      if (candidateAccount) {
+        matchedAccountIds.add(candidateAccount.id);
+        matchedProfileDirs.add(detected.dirName);
+        matches.push({
+          detectedProfile: detected,
+          matchedAccountId: candidateAccount.id,
+          matchType: 'name',
+          confidence: 'medium',
+          currentAccount: candidateAccount
+        });
+      }
+    }
+
+    // Priority 3: Match by Directory Name (e.g. "Default", "Profile 1")
+    for (const detected of detectedProfiles) {
+      if (matchedProfileDirs.has(detected.dirName)) continue;
+
+      const candidateAccount = currentAccounts.find(acc => {
+        if (matchedAccountIds.has(acc.id)) return false;
+        const accUserDir = acc.userDataDir || config.system.chromeUserDataDir;
+        const matchesUserDir = this.resolvePath(accUserDir) === scan.targetDir;
+        return matchesUserDir && acc.chromeProfileDir === detected.dirName;
+      });
+
+      if (candidateAccount) {
+        matchedAccountIds.add(candidateAccount.id);
+        matchedProfileDirs.add(detected.dirName);
+        matches.push({
+          detectedProfile: detected,
+          matchedAccountId: candidateAccount.id,
+          matchType: 'directory',
+          confidence: 'medium',
+          currentAccount: candidateAccount
+        });
+      }
+    }
+
+    // Unmatched detected profiles
+    const unmatchedProfiles = detectedProfiles.filter(p => !matchedProfileDirs.has(p.dirName));
+
+    // Suggest remaining slots for unmatched profiles (without auto-assigning)
+    for (const remaining of unmatchedProfiles) {
+      const freeAccount = currentAccounts.find(acc => !matchedAccountIds.has(acc.id));
+      if (freeAccount) {
+        matchedAccountIds.add(freeAccount.id);
+        matches.push({
+          detectedProfile: remaining,
+          matchedAccountId: freeAccount.id,
+          matchType: 'manual',
+          confidence: 'low',
+          currentAccount: freeAccount
+        });
+      } else {
+        matches.push({
+          detectedProfile: remaining,
+          matchType: 'none',
+          confidence: 'low'
+        });
+      }
+    }
+
+    const unmatchedAccounts = currentAccounts.filter(acc => {
+      const accUserDir = this.resolvePath(acc.userDataDir || config.system.chromeUserDataDir);
+      const isSameBaseDir = accUserDir === scan.targetDir;
+      if (!isSameBaseDir) return false;
+      return !detectedProfiles.some(p => p.dirName === acc.chromeProfileDir);
+    });
+
+    return {
+      userDataDir: scan.targetDir,
+      detectedProfiles,
+      currentAccounts,
+      matches,
+      unmatchedProfiles,
+      unmatchedAccounts,
+      browserVariants,
+      stats: {
+        totalDetected: detectedProfiles.length,
+        totalConfigured: currentAccounts.length,
+        matchedCount: matches.filter(m => m.matchedAccountId).length,
+        unmatchedDetectedCount: unmatchedProfiles.length,
+        unmatchedAccountsCount: unmatchedAccounts.length
+      }
+    };
+  }
+
+  /**
+   * Imports selected profile bindings into the Hub configuration.
+   * Validates real profile existence, prevents duplication, and updates accounts.
+   */
+  public importMatchedProfiles(bindings: ProfileImportBinding[], targetConfigManager?: ConfigManager): {
+    success: boolean;
+    updatedAccountsCount: number;
+    errors?: string[];
+  } {
+    const mgr = targetConfigManager || this.configManager;
+    const config = mgr.getConfig();
+    const errors: string[] = [];
+
+    if (!Array.isArray(bindings) || bindings.length === 0) {
+      return { success: false, updatedAccountsCount: 0, errors: ['Nenhuma associação de perfil foi enviada para importação.'] };
+    }
+
+    // Check duplicate profile assignment in the incoming bindings
+    const boundProfileKeys = new Set<string>();
+    for (const b of bindings) {
+      const targetUserDir = this.resolvePath(b.userDataDir || config.system.chromeUserDataDir);
+      const profileKey = `${targetUserDir}::${b.profileDir}`;
+
+      if (boundProfileKeys.has(profileKey)) {
+        errors.push(`Perfil duplicado no lote de importação: "${b.profileDir}" em "${targetUserDir}" foi atribuído a mais de uma conta.`);
+      } else {
+        boundProfileKeys.add(profileKey);
+      }
+
+      // Check that the profile directory physically exists
+      const fullPath = path.join(targetUserDir, b.profileDir);
+      if (!fs.existsSync(fullPath)) {
+        errors.push(`O perfil "${b.profileDir}" não existe fisicamente no disco em: ${fullPath}`);
+      }
+    }
+
+    if (errors.length > 0) {
+      return { success: false, updatedAccountsCount: 0, errors };
+    }
+
+    const updatedAccounts = config.accounts.map(acc => {
+      const binding = bindings.find(b => b.accountId === acc.id);
+      if (!binding) return acc;
+
+      return {
+        ...acc,
+        chromeProfileDir: binding.profileDir,
+        userDataDir: binding.userDataDir ? this.resolvePath(binding.userDataDir) : undefined,
+        name: binding.name || acc.name,
+        email: binding.email !== undefined ? binding.email : acc.email,
+        color: binding.color || acc.color,
+        avatarIcon: binding.avatarIcon || acc.avatarIcon
+      };
+    });
+
+    const newConfig = {
+      ...config,
+      accounts: updatedAccounts
+    };
+
+    const saveResult = mgr.saveConfig(newConfig);
+    if (!saveResult.success) {
+      return { success: false, updatedAccountsCount: 0, errors: saveResult.errors };
+    }
+
+    return {
+      success: true,
+      updatedAccountsCount: bindings.length
+    };
+  }
+
   public getSystemBrowserInfo(customUserDataDir?: string): SystemBrowserInfo {
     const available = this.detectBrowserBinaries();
     const recommended = available.find(b => b === 'google-chrome' || b === 'google-chrome-stable')
@@ -186,6 +495,7 @@ export class ProfileScanner {
       || 'google-chrome';
 
     const scanResult = this.scanProfiles(customUserDataDir);
+    const browserVariants = this.detectBrowserVariants();
 
     return {
       availableBinaries: available,
@@ -194,7 +504,8 @@ export class ProfileScanner {
       userDataDirExists: scanResult.userDataDirExists,
       detectedProfiles: scanResult.profiles,
       singletonLockActive: scanResult.singletonLockActive,
-      singletonLockPid: scanResult.singletonLockPid
+      singletonLockPid: scanResult.singletonLockPid,
+      browserVariants
     };
   }
 }

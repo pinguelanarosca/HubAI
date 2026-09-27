@@ -1,4 +1,15 @@
-import { HubConfig, LaunchRequest, LaunchResult, DiagnosticReport, DetectedProfile } from '../types.js';
+import {
+  HubConfig,
+  LaunchRequest,
+  LaunchResult,
+  DiagnosticReport,
+  DetectedProfile,
+  ProfileSyncResult,
+  ProfileImportBinding,
+  BrowserVariant,
+  UpdateStatus,
+  UpdateApplyResult
+} from '../types.js';
 
 export async function fetchHubConfig(): Promise<HubConfig> {
   const res = await fetch('/api/config');
@@ -39,14 +50,51 @@ export async function fetchSystemProfiles(userDataDir?: string): Promise<{
   detectedProfiles: DetectedProfile[];
 }> {
   const url = userDataDir
-    ? `/api/system/profiles?userDataDir=${encodeURIComponent(userDataDir)}`
-    : '/api/system/profiles';
+    ? `/api/profiles/detect?userDataDir=${encodeURIComponent(userDataDir)}`
+    : '/api/profiles/detect';
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error('Erro ao escanear perfis do Chrome');
   }
   const data = await res.json();
   return data.data;
+}
+
+export async function syncChromeAccounts(userDataDir?: string): Promise<ProfileSyncResult> {
+  const url = userDataDir
+    ? `/api/profiles/sync?userDataDir=${encodeURIComponent(userDataDir)}`
+    : '/api/profiles/sync';
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error('Falha ao sincronizar contas do Chrome');
+  }
+  const data = await res.json();
+  return data.sync;
+}
+
+export async function importMatchedProfiles(bindings: ProfileImportBinding[]): Promise<{
+  updatedAccountsCount: number;
+  config: HubConfig;
+}> {
+  const res = await fetch('/api/profiles/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bindings })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Falha ao importar perfis do Chrome');
+  }
+  return data;
+}
+
+export async function fetchBrowserVariants(): Promise<BrowserVariant[]> {
+  const res = await fetch('/api/system/browser-variants');
+  if (!res.ok) {
+    throw new Error('Falha ao detectar variantes do navegador');
+  }
+  const data = await res.json();
+  return data.variants;
 }
 
 export async function launchPlatform(req: LaunchRequest): Promise<LaunchResult> {
@@ -69,6 +117,26 @@ export async function runDiagnostics(): Promise<DiagnosticReport> {
   }
   const data = await res.json();
   return data.report;
+}
+
+export async function fetchUpdateStatus(force: boolean = false): Promise<UpdateStatus> {
+  const res = await fetch(force ? '/api/update/check' : '/api/update/status', {
+    method: force ? 'POST' : 'GET'
+  });
+  if (!res.ok) {
+    throw new Error('Falha ao verificar atualizações do HubAI');
+  }
+  const data = await res.json();
+  return data.status;
+}
+
+export async function applyHubUpdate(): Promise<UpdateApplyResult> {
+  const res = await fetch('/api/update/apply', { method: 'POST' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || data.message || 'Falha ao aplicar atualização');
+  }
+  return data.result;
 }
 
 export async function exportDesktopShortcuts(): Promise<{
