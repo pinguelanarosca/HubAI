@@ -106,7 +106,7 @@ export const AccountGrid: React.FC<AccountGridProps> = ({
       </div>
 
       {/* Grid: 3 columns on desktop (3x3 = 9 accounts) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
         {filteredAccounts.map((account) => (
           <AccountCard
             key={account.id}

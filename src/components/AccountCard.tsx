@@ -10,9 +10,7 @@ import {
   Shield,
   RotateCw,
   Folder,
-  MessageSquare,
-  Clock,
-  Info
+  MessageSquare
 } from '../utils/icons.js';
 
 interface AccountCardProps {
@@ -63,185 +61,154 @@ export const AccountCard: React.FC<AccountCardProps> = ({
     }
   };
 
-  // Sync indicator dot color
+  // Sync state indicator
   let syncDot = '🟢';
   if (status?.syncState === 'cached') syncDot = '🟡';
   if (status?.syncState === 'unavailable' || status?.syncState === 'error') syncDot = '⚪';
   if (isSyncing) syncDot = '🔄';
 
-  const planLabel = status?.planName || 'FREE';
+  const planLabel = status?.planName && status.planName !== '--' ? status.planName : 'FREE';
   const hasPhoto = Boolean(status?.profilePictureUrl);
+
+  const projectsList = status?.projects || [];
+  const chatsList = status?.recentChats || [];
 
   return (
     <div
       onClick={() => onLaunch(account.id, false)}
-      className="group relative bg-neutral-900/80 hover:bg-neutral-850 border border-neutral-800 hover:border-neutral-700 rounded-xl p-5 transition-all duration-200 cursor-pointer flex flex-col justify-between shadow-sm hover:shadow-md"
+      className="group relative bg-neutral-900/90 hover:bg-neutral-850 border border-neutral-800 hover:border-neutral-700 rounded-lg p-3 transition-all duration-150 cursor-pointer flex flex-col justify-between shadow-sm hover:shadow-md text-xs"
     >
-      <div>
-        {/* Top Header: Sync Indicator, Real Avatar / Fallback, Provider & Account Info */}
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <div className="flex items-center gap-3 min-w-0">
-            {/* Status Dot + Avatar */}
+      <div className="space-y-2">
+        {/* Compact Header: Real Photo / Fallback, Name, Email, Plan & Profile Dir */}
+        <div className="flex items-center justify-between gap-2 pb-2 border-b border-neutral-800/70">
+          <div className="flex items-center gap-2 min-w-0">
             <div className="relative shrink-0">
               {hasPhoto ? (
                 <img
                   src={status!.profilePictureUrl}
                   alt={account.name}
-                  className="w-11 h-11 rounded-full object-cover border border-neutral-700 shadow-sm"
+                  className="w-8 h-8 rounded-full object-cover border border-neutral-700 shadow-sm shrink-0"
                   onError={(e) => {
-                    // Fallback to Icon if image fails to load
                     (e.target as HTMLElement).style.display = 'none';
                   }}
                 />
               ) : (
                 <div
-                  className="w-11 h-11 rounded-xl flex items-center justify-center text-white shrink-0 shadow-sm transition-transform group-hover:scale-105"
+                  className="w-8 h-8 rounded-md flex items-center justify-center text-white shrink-0 shadow-sm"
                   style={{ backgroundColor: account.color }}
                 >
-                  <Icon className="w-5 h-5" />
+                  <Icon className="w-4 h-4" />
                 </div>
               )}
-              {/* Sync Status Badge */}
-              <span
-                className="absolute -top-1 -left-1 text-[10px] leading-none"
-                title={`Status da Sessão: ${status?.syncState || 'Desconhecido'}`}
-              >
+              <span className="absolute -top-1 -left-1 text-[9px] leading-none" title={`Sessão: ${status?.syncState || 'Padrão'}`}>
                 {syncDot}
               </span>
             </div>
 
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-semibold text-neutral-100 group-hover:text-white truncate">
+            <div className="min-w-0 leading-tight">
+              <div className="flex items-center gap-1.5">
+                <span className="font-semibold text-neutral-100 group-hover:text-white truncate text-xs">
                   {activeProvider.name}
-                </h2>
-                <span className="text-[10px] font-mono font-semibold px-1.5 py-0.2 rounded bg-neutral-800 text-neutral-300 border border-neutral-700 shrink-0">
+                </span>
+                <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-neutral-800 text-neutral-300 border border-neutral-700 shrink-0 font-medium">
                   {planLabel}
                 </span>
               </div>
-              <span className="text-xs text-neutral-300 font-medium truncate block mt-0.5">
-                {account.name}
+              <span className="text-[11px] text-neutral-300 font-medium truncate block">
+                {status?.accountName || account.name}
               </span>
-              <span className="text-[11px] text-neutral-400 truncate block font-mono">
-                {status?.accountEmail || account.email || `Perfil: ${account.chromeProfileDir}`}
+              <span className="text-[10px] text-neutral-400 font-mono truncate block">
+                {status?.accountEmail && status.accountEmail !== '--' ? status.accountEmail : (account.email || '--')}
               </span>
             </div>
           </div>
 
-          {/* Profile directory badge */}
           <div
-            className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-mono bg-neutral-950 border border-neutral-800 text-neutral-300 shrink-0"
-            title={`Sessão isolada no perfil ${account.chromeProfileDir}`}
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-neutral-950 border border-neutral-800 text-neutral-300 shrink-0"
+            title={`Perfil Chrome: ${account.chromeProfileDir}`}
           >
-            <Shield className="w-3 h-3 text-emerald-400" />
+            <Shield className="w-2.5 h-2.5 text-emerald-400" />
             <span>{account.chromeProfileDir}</span>
           </div>
         </div>
 
-        {/* Enrichment Section: Projects */}
-        <div className="mb-3.5 space-y-1 bg-neutral-950/60 p-2.5 rounded-lg border border-neutral-800/80">
-          <div className="flex items-center justify-between text-[11px] font-medium text-neutral-400 mb-1">
-            <span className="flex items-center gap-1.5 font-semibold text-neutral-300">
-              <Folder className="w-3 h-3 text-indigo-400" />
+        {/* Compact Grid: Projects, Chats, Limits & Info */}
+        <div className="grid grid-cols-1 gap-1.5 text-[11px] font-mono">
+          {/* Projects */}
+          <div className="flex items-center justify-between gap-1 bg-neutral-950/80 px-2 py-1 rounded border border-neutral-800/80">
+            <span className="text-neutral-400 shrink-0 flex items-center gap-1 font-sans">
+              <Folder className="w-2.5 h-2.5 text-indigo-400" />
               <span>Projetos:</span>
             </span>
+            <div className="truncate text-right">
+              {status?.hasProjectsConcept ? (
+                projectsList.length > 0 ? (
+                  <span className="text-neutral-200 truncate">{projectsList.map(p => p.name).join(', ')}</span>
+                ) : (
+                  <span className="text-neutral-500">--</span>
+                )
+              ) : (
+                <span className="text-neutral-500">--</span>
+              )}
+            </div>
           </div>
 
-          {status?.hasProjectsConcept ? (
-            status.projects && status.projects.length > 0 ? (
-              <div className="space-y-1">
-                {status.projects.slice(0, 3).map((proj) => (
-                  <div key={proj.id} className="text-xs text-neutral-300 font-mono flex items-center gap-1.5 truncate">
-                    <span className="text-indigo-400/80 text-[10px]">•</span>
-                    <span className="truncate">{proj.name}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <span className="text-[11px] text-neutral-500 italic block font-mono">Nenhum projeto cadastrado</span>
-            )
-          ) : (
-            <span className="text-[11px] text-neutral-500 italic block font-mono">Não aplicável para {activeProvider.name}</span>
-          )}
-        </div>
-
-        {/* Enrichment Section: Recent Chats */}
-        <div className="mb-3.5 space-y-1 bg-neutral-950/60 p-2.5 rounded-lg border border-neutral-800/80">
-          <div className="flex items-center justify-between text-[11px] font-medium text-neutral-400 mb-1">
-            <span className="flex items-center gap-1.5 font-semibold text-neutral-300">
-              <MessageSquare className="w-3 h-3 text-emerald-400" />
+          {/* Chats */}
+          <div className="flex items-center justify-between gap-1 bg-neutral-950/80 px-2 py-1 rounded border border-neutral-800/80">
+            <span className="text-neutral-400 shrink-0 flex items-center gap-1 font-sans">
+              <MessageSquare className="w-2.5 h-2.5 text-emerald-400" />
               <span>Chats recentes:</span>
             </span>
-          </div>
-
-          {status?.recentChats && status.recentChats.length > 0 ? (
-            <div className="space-y-1">
-              {status.recentChats.slice(0, 3).map((chat) => (
-                <div key={chat.id} className="flex items-center justify-between text-xs font-mono gap-2">
-                  <span className="text-neutral-300 truncate">{chat.title}</span>
-                  <span className="text-neutral-500 shrink-0 text-[10px]">{chat.timeOrDate}</span>
-                </div>
-              ))}
+            <div className="truncate text-right">
+              {chatsList.length > 0 ? (
+                <span className="text-neutral-200 truncate">
+                  {chatsList.map(c => `${c.title}${c.timeOrDate ? ` (${c.timeOrDate})` : ''}`).join(' • ')}
+                </span>
+              ) : (
+                <span className="text-neutral-500">--</span>
+              )}
             </div>
-          ) : (
-            <span className="text-[11px] text-neutral-500 italic block font-mono">Nenhum chat recente registrado</span>
-          )}
-        </div>
-
-        {/* Enrichment Section: Usage & Limits */}
-        <div className="mb-3 space-y-1 bg-neutral-950/60 p-2.5 rounded-lg border border-neutral-800/80 text-xs font-mono">
-          <div className="flex items-center justify-between">
-            <span className="text-neutral-400 text-[11px]">Limite:</span>
-            <span className="text-emerald-400 font-semibold text-[11px]">
-              {status?.usage?.limitLabel || 'Disponível'}
-            </span>
           </div>
 
-          <div className="flex items-center justify-between">
-            <span className="text-neutral-400 text-[11px]">Reset:</span>
-            <span className="text-neutral-300 text-[11px]">
-              {status?.usage?.resetTime || '--'}
-            </span>
+          {/* Limits & Reset */}
+          <div className="flex items-center justify-between gap-2 bg-neutral-950/80 px-2 py-1 rounded border border-neutral-800/80 text-[10px]">
+            <div className="flex items-center gap-1">
+              <span className="text-neutral-400 font-sans">Limite:</span>
+              <span className="text-emerald-400 font-semibold">{status?.usage?.limitLabel || '--'}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-neutral-400 font-sans">Reset:</span>
+              <span className="text-neutral-300">{status?.usage?.resetTime || '--'}</span>
+            </div>
           </div>
 
-          <div className="flex items-center justify-between pt-1 border-t border-neutral-900 text-[10px]">
-            <span className="text-neutral-500">Mais informações:</span>
-            <span className="text-neutral-400 truncate max-w-[160px]" title={status?.syncMessage}>
-              {status?.syncMessage || 'Sessão verificada'}
+          {/* Extra Sync Details */}
+          <div className="flex items-center justify-between gap-1 px-1 text-[10px] text-neutral-500">
+            <span>Mais informações:</span>
+            <span className="text-neutral-400 truncate max-w-[180px]" title={status?.syncMessage || '--'}>
+              {status?.syncMessage || '--'}
             </span>
-          </div>
-        </div>
-
-        {/* Action Callout Bar */}
-        <div className="bg-neutral-950 rounded-lg p-2.5 border border-neutral-800 flex items-center justify-between">
-          <div className="min-w-0 pr-2">
-            <span className="text-[10px] text-neutral-500 uppercase tracking-wider block font-semibold">
-              Destino no Perfil
-            </span>
-            <span className="text-xs font-medium text-neutral-300 truncate block">
-              {activeProvider.name}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400 group-hover:text-emerald-300 transition-colors shrink-0">
-            <span>{isLaunching ? 'Abrindo...' : 'Abrir Sessão'}</span>
-            <ExternalLink className="w-3.5 h-3.5 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
           </div>
         </div>
       </div>
 
-      {/* Card Footer: Quick Actions & Sync */}
-      <div className="mt-4 pt-3 border-t border-neutral-800/70 flex items-center justify-between text-xs text-neutral-400">
-        <span className="text-[11px] text-neutral-500 font-mono">
-          Conta #{account.order}
-        </span>
+      {/* Footer Controls: Iniciar Janela / Validar / Comando / Sincronizar */}
+      <div className="mt-2 pt-2 border-t border-neutral-800/80 flex items-center justify-between text-[11px]">
+        <button
+          onClick={() => onLaunch(account.id, false)}
+          className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded shadow-sm transition-colors shrink-0"
+          title="Iniciar janela do Chrome com este perfil"
+        >
+          <span>{isLaunching ? 'Abrindo...' : 'Iniciar Janela'}</span>
+          <ExternalLink className="w-3 h-3" />
+        </button>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1 text-neutral-400">
           <button
             onClick={handleSync}
             disabled={isSyncing}
-            className="px-2 py-1 rounded hover:bg-neutral-800 hover:text-neutral-200 text-[11px] text-neutral-400 flex items-center gap-1 transition-colors"
-            title="Sincronizar dados da sessão"
+            className="px-1.5 py-0.5 rounded hover:bg-neutral-800 hover:text-neutral-200 transition-colors flex items-center gap-1"
+            title="Sincronizar sessão real da conta"
           >
             <RotateCw className={`w-3 h-3 text-neutral-400 ${isSyncing ? 'animate-spin' : ''}`} />
             <span>Sincronizar</span>
@@ -249,8 +216,8 @@ export const AccountCard: React.FC<AccountCardProps> = ({
 
           <button
             onClick={handleDryRun}
-            className="px-2 py-1 rounded hover:bg-neutral-800 hover:text-neutral-200 text-[11px] text-neutral-400 flex items-center gap-1 transition-colors"
-            title="Validar comando sem iniciar janela"
+            className="px-1.5 py-0.5 rounded hover:bg-neutral-800 hover:text-neutral-200 transition-colors flex items-center gap-1"
+            title="Validar comando do perfil"
           >
             <Play className="w-3 h-3 text-neutral-400" />
             <span>Validar</span>
@@ -258,15 +225,15 @@ export const AccountCard: React.FC<AccountCardProps> = ({
 
           <button
             onClick={handleCopyCommand}
-            className="px-2 py-1 rounded hover:bg-neutral-800 hover:text-neutral-200 text-[11px] text-neutral-400 flex items-center gap-1 transition-colors"
-            title="Copiar comando Linux"
+            className="px-1.5 py-0.5 rounded hover:bg-neutral-800 hover:text-neutral-200 transition-colors flex items-center gap-1"
+            title="Copiar comando de terminal Linux"
           >
             {copiedCmd ? (
               <Check className="w-3 h-3 text-emerald-400" />
             ) : (
               <Terminal className="w-3 h-3 text-neutral-400" />
             )}
-            <span>{copiedCmd ? 'Copiado!' : 'Comando'}</span>
+            <span>{copiedCmd ? 'Copiado' : 'Comando'}</span>
           </button>
         </div>
       </div>

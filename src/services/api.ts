@@ -43,6 +43,27 @@ export async function resetHubConfig(): Promise<HubConfig> {
   return data.config;
 }
 
+export async function exportConfigBackup(): Promise<HubConfig> {
+  const res = await fetch('/api/config/backup');
+  if (!res.ok) {
+    throw new Error('Falha ao exportar backup de configuração');
+  }
+  return await res.json();
+}
+
+export async function restoreConfigBackup(backupData: any): Promise<HubConfig> {
+  const res = await fetch('/api/config/restore', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(backupData)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Falha ao restaurar backup de configuração');
+  }
+  return data.config;
+}
+
 export async function fetchSystemProfiles(userDataDir?: string): Promise<{
   availableBinaries: string[];
   recommendedBinary: string;

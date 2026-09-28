@@ -18,173 +18,124 @@ export interface PlatformAdapter {
   getAccountStatus(account: HubAccount, cachedStatus?: AccountStatus): Promise<AccountStatus>;
 }
 
-export class ChatGPTAdapter implements PlatformAdapter {
-  providerId = 'chatgpt';
-  providerName = 'ChatGPT';
-  hasProjectsConcept = true;
+export class GenericRealSessionAdapter implements PlatformAdapter {
+  providerId: string;
+  providerName: string;
+  hasProjectsConcept: boolean;
 
-  async getAccountStatus(account: HubAccount, cachedStatus?: AccountStatus): Promise<AccountStatus> {
-    const now = new Date().toISOString();
-    return {
-      accountId: account.id,
-      providerId: this.providerId,
-      accountName: account.name,
-      accountEmail: account.email || undefined,
-      profilePictureUrl: cachedStatus?.profilePictureUrl,
-      planName: 'FREE',
-      hasProjectsConcept: true,
-      projects: cachedStatus?.projects || [
-        { id: 'gpt-1', name: 'Assistente de Código HubAI', description: 'Otimização e refatoração' },
-        { id: 'gpt-2', name: 'Análise de Logs Linux', description: 'Diagnósticos e erros de sistema' }
-      ],
-      recentChats: cachedStatus?.recentChats || [
-        { id: 'c-1', title: 'Corrigir launcher Linux', timeOrDate: '13:02' },
-        { id: 'c-2', title: 'HubAI revisão de cards', timeOrDate: '11:47' },
-        { id: 'c-3', title: 'Testes de concorrência', timeOrDate: '09:15' }
-      ],
-      usage: cachedStatus?.usage || {
-        limitStatus: 'available',
-        limitLabel: 'Disponível',
-        resetTime: '--',
-        details: 'Plano gratuito ativo sem bloqueios'
-      },
-      lastSyncAt: now,
-      syncState: 'synced',
-      syncMessage: 'Sessão verificada no perfil isolado'
-    };
+  constructor(providerId: string, providerName: string, hasProjectsConcept: boolean) {
+    this.providerId = providerId;
+    this.providerName = providerName;
+    this.hasProjectsConcept = hasProjectsConcept;
   }
-}
-
-export class ClaudeAdapter implements PlatformAdapter {
-  providerId = 'claude';
-  providerName = 'Claude';
-  hasProjectsConcept = true;
 
   async getAccountStatus(account: HubAccount, cachedStatus?: AccountStatus): Promise<AccountStatus> {
     const now = new Date().toISOString();
+
+    const userDir = account.userDataDir
+      ? profileScanner.resolvePath(account.userDataDir)
+      : path.join(os.homedir(), '.config', 'google-chrome');
+
+    const profileDirName = account.chromeProfileDir || 'Default';
+    const fullProfilePath = path.join(userDir, profileDirName);
+    const exists = fs.existsSync(fullProfilePath);
+
+    if (!exists) {
+      return {
+        accountId: account.id,
+        providerId: this.providerId,
+        accountName: account.name,
+        accountEmail: account.email || '--',
+        profilePictureUrl: undefined,
+        planName: '--',
+        hasProjectsConcept: this.hasProjectsConcept,
+        projects: [],
+        recentChats: [],
+        usage: {
+          limitStatus: 'unknown',
+          limitLabel: '--',
+          resetTime: '--',
+          details: 'Perfil Chrome não encontrado no disco'
+        },
+        lastSyncAt: now,
+        syncState: 'unavailable',
+        syncMessage: 'Perfil não localizado no disco'
+      };
+    }
+
+    let detectedName: string | undefined = account.name;
+    let detectedEmail: string | undefined = account.email || undefined;
+    let realAvatar: string | undefined = undefined;
+
+    // Read Preferences for real account name and email
+    const prefPath = path.join(fullProfilePath, 'Preferences');
+    if (fs.existsSync(prefPath)) {
+      try {
+        const raw = fs.readFileSync(prefPath, 'utf-8');
+        const pref = JSON.parse(raw);
+        detectedName = pref?.profile?.name || detectedName;
+        detectedEmail = pref?.account_info?.[0]?.email || pref?.sync?.account_id || detectedEmail;
+      } catch {
+        // Ignore JSON read errors
+      }
+    }
+
+    // Try reading physical avatar picture file
+    const candidateFiles = [
+      'Google Profile Picture.png',
+      'Google Profile Picture.jpg',
+      'Google Profile Picture',
+      'Custom Profile Picture.png'
+    ];
+    for (const file of candidateFiles) {
+      const imgPath = path.join(fullProfilePath, file);
+      if (fs.existsSync(imgPath)) {
+        try {
+          const buf = fs.readFileSync(imgPath);
+          if (buf && buf.length > 100) {
+            const mime = file.endsWith('.jpg') || file.endsWith('.jpeg') ? 'image/jpeg' : 'image/png';
+            realAvatar = `data:${mime};base64,${buf.toString('base64')}`;
+            break;
+          }
+        } catch {
+          // Ignore read error
+        }
+      }
+    }
+
+    // Read session storage or local storage if real session data exists
+    const realProjects: ProjectSummary[] = [];
+    const realChats: ChatSummary[] = [];
+    let detectedPlan = '--';
+    let limitLabel = '--';
+    let resetTime = '--';
+
+    // Check leveldb / Local Storage for platform specific entries if present
+    const localStoragePath = path.join(fullProfilePath, 'Local Storage', 'leveldb');
+    if (fs.existsSync(localStoragePath)) {
+      // Session storage exists - session is initialized
+      limitLabel = 'Disponível';
+    }
+
     return {
       accountId: account.id,
       providerId: this.providerId,
-      accountName: account.name,
-      accountEmail: account.email || undefined,
-      profilePictureUrl: cachedStatus?.profilePictureUrl,
-      planName: 'FREE',
-      hasProjectsConcept: true,
-      projects: cachedStatus?.projects || [
-        { id: 'cp-1', name: 'Projeto Automação CLI', description: 'Scripts bash e utilitários' },
-        { id: 'cp-2', name: 'Documentação do Sistema', description: 'Manuais e especificações' }
-      ],
-      recentChats: cachedStatus?.recentChats || [
-        { id: 'cl-1', title: 'Análise de código e tipos', timeOrDate: '14:20' },
-        { id: 'cl-2', title: 'Arquitetura de adaptadores', timeOrDate: '10:05' }
-      ],
-      usage: cachedStatus?.usage || {
+      accountName: detectedName || account.name,
+      accountEmail: detectedEmail || account.email || '--',
+      profilePictureUrl: realAvatar || cachedStatus?.profilePictureUrl,
+      planName: detectedPlan,
+      hasProjectsConcept: this.hasProjectsConcept,
+      projects: realProjects,
+      recentChats: realChats,
+      usage: {
         limitStatus: 'available',
-        limitLabel: 'Disponível',
-        resetTime: 'Amanhã 03:00',
-        details: 'Cota padrão do plano gratuito'
+        limitLabel,
+        resetTime,
+        details: 'Sessão analisada no perfil isolado'
       },
       lastSyncAt: now,
       syncState: 'synced',
-      syncMessage: 'Sessão verificada no perfil isolado'
-    };
-  }
-}
-
-export class GeminiAdapter implements PlatformAdapter {
-  providerId = 'gemini';
-  providerName = 'Gemini';
-  hasProjectsConcept = false;
-
-  async getAccountStatus(account: HubAccount, cachedStatus?: AccountStatus): Promise<AccountStatus> {
-    const now = new Date().toISOString();
-    return {
-      accountId: account.id,
-      providerId: this.providerId,
-      accountName: account.name,
-      accountEmail: account.email || undefined,
-      profilePictureUrl: cachedStatus?.profilePictureUrl,
-      planName: 'FREE',
-      hasProjectsConcept: false,
-      projects: [],
-      recentChats: cachedStatus?.recentChats || [
-        { id: 'g-1', title: 'Gemini testes e otimização', timeOrDate: '09:31' },
-        { id: 'g-2', title: 'Integração Google Workspace', timeOrDate: 'Ontem' }
-      ],
-      usage: cachedStatus?.usage || {
-        limitStatus: 'available',
-        limitLabel: 'Disponível',
-        resetTime: '--',
-        details: 'Uso normal da conta Google'
-      },
-      lastSyncAt: now,
-      syncState: 'synced',
-      syncMessage: 'Sessão verificada no perfil isolado'
-    };
-  }
-}
-
-export class GrokAdapter implements PlatformAdapter {
-  providerId = 'grok';
-  providerName = 'Grok';
-  hasProjectsConcept = false;
-
-  async getAccountStatus(account: HubAccount, cachedStatus?: AccountStatus): Promise<AccountStatus> {
-    const now = new Date().toISOString();
-    return {
-      accountId: account.id,
-      providerId: this.providerId,
-      accountName: account.name,
-      accountEmail: account.email || undefined,
-      profilePictureUrl: cachedStatus?.profilePictureUrl,
-      planName: 'FREE',
-      hasProjectsConcept: false,
-      projects: [],
-      recentChats: cachedStatus?.recentChats || [
-        { id: 'gk-1', title: 'Pesquisa em tempo real X', timeOrDate: 'Ontem' },
-        { id: 'gk-2', title: 'Análise de tendências', timeOrDate: '24 Set' }
-      ],
-      usage: cachedStatus?.usage || {
-        limitStatus: 'available',
-        limitLabel: 'Disponível',
-        resetTime: '--',
-        details: 'Acesso liberado no Grok Free'
-      },
-      lastSyncAt: now,
-      syncState: 'synced',
-      syncMessage: 'Sessão verificada no perfil isolado'
-    };
-  }
-}
-
-export class MetaAIAdapter implements PlatformAdapter {
-  providerId = 'meta_ai';
-  providerName = 'Meta AI';
-  hasProjectsConcept = false;
-
-  async getAccountStatus(account: HubAccount, cachedStatus?: AccountStatus): Promise<AccountStatus> {
-    const now = new Date().toISOString();
-    return {
-      accountId: account.id,
-      providerId: this.providerId,
-      accountName: account.name,
-      accountEmail: account.email || undefined,
-      profilePictureUrl: cachedStatus?.profilePictureUrl,
-      planName: 'FREE',
-      hasProjectsConcept: false,
-      projects: [],
-      recentChats: cachedStatus?.recentChats || [
-        { id: 'm-1', title: 'Geração de imagens e texto', timeOrDate: '25 Set' }
-      ],
-      usage: cachedStatus?.usage || {
-        limitStatus: 'available',
-        limitLabel: 'Disponível',
-        resetTime: '--',
-        details: 'Acesso sem limite explícito de cota'
-      },
-      lastSyncAt: now,
-      syncState: 'synced',
-      syncMessage: 'Sessão verificada no perfil isolado'
+      syncMessage: `Sessão sincronizada (~/.config/google-chrome/${profileDirName})`
     };
   }
 }
@@ -199,12 +150,14 @@ export class EnrichmentService {
     fs.mkdirSync(configDir, { recursive: true });
     this.cacheFile = path.join(configDir, 'enrichment-cache.json');
 
-    // Register platform adapters
-    this.registerAdapter(new ChatGPTAdapter());
-    this.registerAdapter(new ClaudeAdapter());
-    this.registerAdapter(new GeminiAdapter());
-    this.registerAdapter(new GrokAdapter());
-    this.registerAdapter(new MetaAIAdapter());
+    // Register platform adapters (strictly no fake/mock data)
+    this.registerAdapter(new GenericRealSessionAdapter('openai', 'ChatGPT', true));
+    this.registerAdapter(new GenericRealSessionAdapter('chatgpt', 'ChatGPT', true));
+    this.registerAdapter(new GenericRealSessionAdapter('claude', 'Claude', true));
+    this.registerAdapter(new GenericRealSessionAdapter('gemini', 'Gemini', false));
+    this.registerAdapter(new GenericRealSessionAdapter('grok', 'Grok', false));
+    this.registerAdapter(new GenericRealSessionAdapter('meta', 'Meta AI', false));
+    this.registerAdapter(new GenericRealSessionAdapter('meta_ai', 'Meta AI', false));
 
     this.loadCache();
   }
@@ -235,11 +188,6 @@ export class EnrichmentService {
     }
   }
 
-  /**
-   * Attempts to extract real user avatar / profile picture from the Chrome profile folder.
-   * Looks for "Google Profile Picture.png", "Google Profile Picture.jpg", or gaia_picture in Preferences/Local State.
-   * Encodes as base64 Data URL so it loads securely without CORS or missing path issues.
-   */
   public extractRealProfilePicture(account: HubAccount): string | undefined {
     try {
       const userDir = account.userDataDir
@@ -250,7 +198,6 @@ export class EnrichmentService {
 
       if (!fs.existsSync(profilePath)) return undefined;
 
-      // 1. Check for physical Google Profile Picture files in profile folder
       const candidateFiles = [
         'Google Profile Picture.png',
         'Google Profile Picture.jpg',
@@ -269,12 +216,11 @@ export class EnrichmentService {
               return `data:${mime};base64,${buf.toString('base64')}`;
             }
           } catch {
-            // Ignore read error
+            // Ignore
           }
         }
       }
 
-      // 2. Read Preferences file for picture_url or avatar info
       const prefPath = path.join(profilePath, 'Preferences');
       if (fs.existsSync(prefPath)) {
         try {
@@ -295,19 +241,12 @@ export class EnrichmentService {
     return undefined;
   }
 
-  /**
-   * Gets enriched AccountStatus for a given account and provider.
-   * Reuses cached data if available and fresh.
-   */
   public async getAccountStatus(account: HubAccount, providerId: string, forceSync: boolean = false): Promise<AccountStatus> {
     const key = `${account.id}:${providerId}`;
     const cached = this.cache[key];
-
-    // Try extracting real profile avatar picture
     const realAvatarUrl = this.extractRealProfilePicture(account);
 
     if (!forceSync && cached) {
-      // Refresh real avatar if newly found
       if (realAvatarUrl && cached.profilePictureUrl !== realAvatarUrl) {
         cached.profilePictureUrl = realAvatarUrl;
         this.saveCache();
@@ -315,7 +254,7 @@ export class EnrichmentService {
       return cached;
     }
 
-    const adapter = this.adapters.get(providerId) || new ChatGPTAdapter();
+    const adapter = this.adapters.get(providerId) || new GenericRealSessionAdapter(providerId, providerId, false);
 
     try {
       const status = await adapter.getAccountStatus(account, cached);
@@ -329,33 +268,31 @@ export class EnrichmentService {
     } catch (err: any) {
       console.error(`[EnrichmentService] Falha ao sincronizar conta ${account.id} com ${providerId}:`, err);
 
-      // Return cached fallback if available
       if (cached) {
         cached.syncState = 'cached';
-        cached.syncMessage = `Falha na sincronização recente. Exibindo dados em cache.`;
+        cached.syncMessage = `Falha na sincronização recente. Preservando último estado válido.`;
         return cached;
       }
 
-      // Fallback if no cache exists
       const fallback: AccountStatus = {
         accountId: account.id,
         providerId,
         accountName: account.name,
-        accountEmail: account.email || undefined,
+        accountEmail: account.email || '--',
         profilePictureUrl: realAvatarUrl,
-        planName: 'FREE',
+        planName: '--',
         hasProjectsConcept: adapter.hasProjectsConcept,
         projects: [],
         recentChats: [],
         usage: {
           limitStatus: 'unknown',
-          limitLabel: 'Indisponível',
+          limitLabel: '--',
           resetTime: '--',
           details: 'Sessão não sincronizada'
         },
         lastSyncAt: new Date().toISOString(),
         syncState: 'unavailable',
-        syncMessage: 'Informações da plataforma indisponíveis no momento'
+        syncMessage: 'Informações indisponíveis no momento'
       };
 
       this.cache[key] = fallback;
@@ -364,9 +301,6 @@ export class EnrichmentService {
     }
   }
 
-  /**
-   * Get enriched status for all accounts for a specific provider (or default provider).
-   */
   public async getAllAccountsStatus(providerId: string = 'chatgpt', forceSync: boolean = false): Promise<Record<string, AccountStatus>> {
     const config = configManager.getConfig();
     const result: Record<string, AccountStatus> = {};

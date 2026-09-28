@@ -40,6 +40,8 @@ import {
 import {
   saveHubConfig,
   resetHubConfig,
+  exportConfigBackup,
+  restoreConfigBackup,
   syncChromeAccounts,
   importMatchedProfiles,
   fetchBrowserVariants,
@@ -248,6 +250,111 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         setSaveError(err.message);
       }
     }
+  };
+
+  const handleExportBackup = async () => {
+    try {
+      const backupData = await exportConfigBackup();
+      const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `hubai-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2500);
+    } catch (err: any) {
+      setSaveError(err.message || 'Falha ao exportar backup de configuração.');
+    }
+  };
+
+  const handleRestoreBackupFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const content = event.target?.result as string;
+        const parsed = JSON.parse(content);
+
+        if (!window.confirm('Atenção: A restauração ZERA o aplicativo e aplica estritamente a configuração do arquivo de backup (sem mesclar). Deseja continuar?')) {
+          e.target.value = '';
+          return;
+        }
+
+        const restored = await restoreConfigBackup(parsed);
+        setLocalConfig(restored);
+        onConfigSaved(restored);
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 2500);
+      } catch (err: any) {
+        setSaveError(err.message || 'Erro ao processar arquivo de backup.');
+      } finally {
+        e.target.value = '';
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleAddOptionalProviders = () => {
+    const optionalProviders: AIProvider[] = [
+      {
+        id: 'perplexity',
+        name: 'Perplexity AI',
+        shortName: 'Perplexity',
+        defaultUrl: 'https://www.perplexity.ai',
+        category: 'reasoning',
+        icon: 'Compass',
+        description: 'Conversational answer engine with live verified citations',
+        badge: 'Perplexity',
+        enabled: true,
+        order: localConfig.providers.length + 1
+      },
+      {
+        id: 'deepseek',
+        name: 'DeepSeek',
+        shortName: 'DeepSeek',
+        defaultUrl: 'https://chat.deepseek.com',
+        category: 'code',
+        icon: 'Code',
+        description: 'DeepSeek-R1 reasoning & DeepSeek-V3 open weights assistant',
+        badge: 'DeepSeek',
+        enabled: true,
+        order: localConfig.providers.length + 2
+      },
+      {
+        id: 'mistral',
+        name: 'Mistral Le Chat',
+        shortName: 'Mistral',
+        defaultUrl: 'https://chat.mistral.ai',
+        category: 'general',
+        icon: 'Cpu',
+        description: 'European AI platform with Le Chat, Pixtral & Codestral',
+        badge: 'Mistral',
+        enabled: true,
+        order: localConfig.providers.length + 3
+      }
+    ];
+
+    setLocalConfig((prev) => {
+      const existingIds = new Set(prev.providers.map((p) => p.id));
+      const toAdd = optionalProviders.filter((p) => !existingIds.has(p.id));
+
+      if (toAdd.length === 0) {
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 2000);
+        return prev;
+      }
+
+      return {
+        ...prev,
+        providers: [...prev.providers, ...toAdd]
+      };
+    });
   };
 
   const handleUpdateAccount = (id: string, updates: Partial<HubAccount>) => {
@@ -699,7 +806,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* TAB 2: PROVIDERS */}
           {activeTab === 'providers' && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h3 className="text-xs font-semibold text-neutral-200">
                     Provedores de Inteligência Artificial
@@ -708,13 +815,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     Defina as plataformas disponíveis e suas URLs padrão.
                   </p>
                 </div>
-                <button
-                  onClick={handleAddProvider}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-white bg-neutral-800 hover:bg-neutral-700 rounded-lg transition-colors"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Novo Provedor</span>
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={handleAddOptionalProviders}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-neutral-200 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 rounded-lg transition-colors"
+                    title="Adicionar DeepSeek, Mistral e Perplexity à lista de provedores"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Adicionar DeepSeek / Mistral / Perplexity</span>
+                  </button>
+
+                  <button
+                    onClick={handleAddProvider}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-white bg-neutral-800 hover:bg-neutral-700 rounded-lg transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Novo Provedor</span>
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-3">
@@ -935,6 +1053,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="text-[11px] text-neutral-500">
                     Garante janelas separadas para cada perfil em ambientes de desktop multimonitor ou áreas de trabalho virtuais no Linux.
                   </div>
+                </div>
+
+                {/* Backup & Restore Section */}
+                <div className="p-4 bg-neutral-950 border border-neutral-800 rounded-xl space-y-3">
+                  <div>
+                    <span className="text-xs text-neutral-200 font-semibold block">
+                      Backup & Restauração Completa da Aplicação
+                    </span>
+                    <span className="text-[11px] text-neutral-400 block mt-0.5">
+                      Exporte ou restaure todas as contas, provedores, URLs e preferências personalizadas.
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-2 border-t border-neutral-800">
+                    <button
+                      onClick={handleExportBackup}
+                      className="px-3.5 py-2 text-xs font-medium bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-200 rounded-lg transition-colors flex items-center justify-center gap-1.5 shrink-0"
+                    >
+                      <Download className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Exportar Backup (.json)</span>
+                    </button>
+
+                    <label className="px-3.5 py-2 text-xs font-medium bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-200 rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer shrink-0">
+                      <Archive className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Restaurar de Arquivo (.json)</span>
+                      <input
+                        type="file"
+                        accept=".json"
+                        onChange={handleRestoreBackupFile}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+
+                  <span className="text-[10px] text-amber-400/90 block font-mono bg-neutral-900/60 p-2 rounded border border-neutral-800">
+                    Nota: A restauração zera o estado atual da aplicação e aplica estritamente o arquivo de backup selecionado (sem mesclar dados).
+                  </span>
                 </div>
 
                 {/* Reset Section */}

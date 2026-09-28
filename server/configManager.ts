@@ -285,6 +285,25 @@ export class ConfigManager {
     return this.config;
   }
 
+  public restoreBackupConfig(backupData: any): { success: boolean; config?: HubConfig; errors?: string[] } {
+    this.ensureConfigDir();
+    const validation = this.validateConfig(backupData);
+
+    if (!validation.valid) {
+      return { success: false, errors: validation.errors };
+    }
+
+    try {
+      // Zera o app e aplica estritamente a configuração do arquivo de BK (sem mesclar)
+      this.config = JSON.parse(JSON.stringify(backupData)) as HubConfig;
+      fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2), 'utf-8');
+      return { success: true, config: this.config };
+    } catch (err: any) {
+      console.error('[ConfigManager] Falha ao restaurar backup de configuração:', err);
+      return { success: false, errors: [err.message] };
+    }
+  }
+
   public updateAccountLastUsed(accountId: string) {
     const acc = this.config.accounts.find(a => a.id === accountId);
     if (acc) {

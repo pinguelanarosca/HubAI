@@ -63,6 +63,35 @@ async function startServer() {
     }
   });
 
+  app.get('/api/config/backup', (req, res) => {
+    try {
+      const config = configManager.getConfig();
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="hubai-backup-${Date.now()}.json"`);
+      res.json(config);
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/config/restore', (req, res) => {
+    try {
+      const backupData = req.body;
+      const result = configManager.restoreBackupConfig(backupData);
+      if (result.success) {
+        res.json({ success: true, config: result.config });
+      } else {
+        res.status(400).json({
+          success: false,
+          errors: result.errors,
+          error: result.errors?.join(' ') || 'Arquivo de backup inválido'
+        });
+      }
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // 2. Profile Discovery & Synchronization Endpoints (Google Chrome / Chromium)
   const handleSync = (req: express.Request, res: express.Response) => {
     try {

@@ -25,7 +25,7 @@ export const defaultHubConfig: HubConfig = {
       defaultUrl: 'https://gemini.google.com/app',
       category: 'multimodal',
       icon: 'Sparkles',
-      description: 'Google AI Assistant (Gemini 2.5 Flash / Pro, Canvas & Deep Research)',
+      description: 'Google AI Assistant (Gemini Flash & Pro)',
       badge: 'Google',
       enabled: true,
       order: 1
@@ -37,7 +37,7 @@ export const defaultHubConfig: HubConfig = {
       defaultUrl: 'https://chatgpt.com',
       category: 'general',
       icon: 'Bot',
-      description: 'OpenAI ChatGPT (GPT-4o, o3-mini, Canvas & Voice)',
+      description: 'OpenAI ChatGPT (GPT-4o, Canvas & Voice)',
       badge: 'OpenAI',
       enabled: true,
       order: 2
@@ -61,7 +61,7 @@ export const defaultHubConfig: HubConfig = {
       defaultUrl: 'https://grok.com',
       category: 'reasoning',
       icon: 'Zap',
-      description: 'xAI Grok 3 with deep real-time reasoning & web search',
+      description: 'xAI Grok 3 with real-time web search',
       badge: 'xAI',
       enabled: true,
       order: 4
@@ -73,46 +73,10 @@ export const defaultHubConfig: HubConfig = {
       defaultUrl: 'https://www.meta.ai',
       category: 'general',
       icon: 'Globe',
-      description: 'Meta Llama 3 platform for generation and visual reasoning',
+      description: 'Meta Llama platform for generation and visual reasoning',
       badge: 'Meta',
       enabled: true,
       order: 5
-    },
-    {
-      id: 'perplexity',
-      name: 'Perplexity AI',
-      shortName: 'Perplexity',
-      defaultUrl: 'https://www.perplexity.ai',
-      category: 'reasoning',
-      icon: 'Compass',
-      description: 'Conversational answer engine with live verified citations',
-      badge: 'Perplexity',
-      enabled: true,
-      order: 6
-    },
-    {
-      id: 'deepseek',
-      name: 'DeepSeek',
-      shortName: 'DeepSeek',
-      defaultUrl: 'https://chat.deepseek.com',
-      category: 'code',
-      icon: 'Code',
-      description: 'DeepSeek-R1 reasoning & DeepSeek-V3 open weights assistant',
-      badge: 'DeepSeek',
-      enabled: true,
-      order: 7
-    },
-    {
-      id: 'mistral',
-      name: 'Mistral Le Chat',
-      shortName: 'Mistral',
-      defaultUrl: 'https://chat.mistral.ai',
-      category: 'general',
-      icon: 'Cpu',
-      description: 'European AI platform with Le Chat, Pixtral & Codestral',
-      badge: 'Mistral',
-      enabled: true,
-      order: 8
     }
   ],
   accounts: [
