@@ -211,6 +211,17 @@ async function startServer() {
     }
   });
 
+  app.post('/api/accounts/:id/history/refresh', async (req, res) => {
+    try {
+      const accountId = req.params.id;
+      const providerId = req.body.providerId || req.query.providerId || 'chatgpt';
+      const history = await enrichmentService.refreshHistory(accountId, providerId as string);
+      res.json({ success: true, history });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   app.post('/api/accounts/:id/history/clear', (req, res) => {
     try {
       const accountId = req.params.id;

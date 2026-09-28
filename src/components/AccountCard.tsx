@@ -12,7 +12,7 @@ import {
   X
 } from '../utils/icons.js';
 import { getProviderTheme } from '../utils/theme.js';
-import { fetchAccountHistory, clearAccountHistory } from '../services/api.js';
+import { fetchAccountHistory, clearAccountHistory, refreshAccountHistory } from '../services/api.js';
 
 interface AccountCardProps {
   account: HubAccount;
@@ -47,11 +47,20 @@ export const AccountCard: React.FC<AccountCardProps> = ({
   useEffect(() => {
     setLoadingHistory(true);
     loadHistory().finally(() => setLoadingHistory(false));
-
-    // Poll history every 5 seconds for real-time live logs
-    const interval = setInterval(loadHistory, 5000);
-    return () => clearInterval(interval);
   }, [account.id, activeProvider.id]);
+
+  const handleRefreshHistory = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setLoadingHistory(true);
+    try {
+      const hist = await refreshAccountHistory(account.id, activeProvider.id);
+      setHistoryList(hist);
+    } catch (err) {
+      console.error('Erro ao atualizar histórico:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
 
   const Icon = getAccountIcon(account.avatarIcon);
   const theme = getProviderTheme(activeProvider.id);
@@ -159,7 +168,14 @@ export const AccountCard: React.FC<AccountCardProps> = ({
         <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between border-b border-neutral-800/60 pb-1">
             <div className="flex items-center gap-1.5">
-              <Clock className={`w-3.5 h-3.5 ${theme.accentText}`} />
+              <button
+                onClick={handleRefreshHistory}
+                disabled={loadingHistory}
+                className={`p-1 -ml-1 rounded-full hover:bg-neutral-800/60 transition-all ${loadingHistory ? 'animate-spin' : ''}`}
+                title="Sincronizar com o histórico local do navegador"
+              >
+                <Clock className={`w-3.5 h-3.5 ${theme.accentText}`} />
+              </button>
               <span className="text-[9px] uppercase font-bold text-neutral-400 tracking-wider">
                 Histórico de Navegação
               </span>
@@ -179,25 +195,37 @@ export const AccountCard: React.FC<AccountCardProps> = ({
           <div className="h-24 overflow-y-auto space-y-1.5 pr-1 select-text scrollbar-thin scrollbar-thumb-neutral-900 text-left">
             {loadingHistory && historyList.length === 0 ? (
               <div className="h-full flex items-center justify-center text-[10px] text-neutral-500 font-mono">
-                Carregando logs...
+                Buscando histórico...
               </div>
             ) : historyList.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center p-2 bg-neutral-950/40 rounded border border-neutral-900/60">
                 <span className="text-[9px] text-neutral-500 font-mono">Nenhum log para {activeProvider.name}.</span>
                 <span className="text-[8px] text-neutral-600 mt-0.5 max-w-[190px] leading-normal">
-                  Aba {activeProvider.name} ativa nesta conta registrará o histórico automaticamente.
+                  Clique no ícone de relógio para sincronizar os dados do histórico do Chrome.
                 </span>
               </div>
             ) : (
-              historyList.slice(-10).reverse().map((item, idx) => {
-                const dateStr = new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+              historyList.slice(0, 15).map((item, idx) => {
+                const dateObj = new Date(item.timestamp);
+                const day = String(dateObj.getDate()).padStart(2, '0');
+                const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                const year = String(dateObj.getFullYear()).slice(-2);
+                const dateStr = `${day}/${month}/${year}`;
+                
+                const hours = String(dateObj.getHours()).padStart(2, '0');
+                const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+                const seconds = String(dateObj.getSeconds()).padStart(2, '0');
+                const timeStr = `${hours}:${minutes}:${seconds}`;
+
                 return (
                   <div 
                     key={idx} 
                     className="p-1 px-1.5 rounded bg-neutral-950/50 border border-neutral-900/40 hover:bg-neutral-900/70 hover:border-neutral-800 transition-all text-left group/item relative flex flex-col min-w-0"
                   >
                     <div className="flex items-center justify-between gap-1">
-                      <span className="text-[8px] text-neutral-500 font-mono">{dateStr}</span>
+                      <span className="text-[8px] text-neutral-400 font-mono">
+                        {dateStr} <span className={theme.accentText}>{timeStr}</span>
+                      </span>
                       <a 
                         href={item.url} 
                         target="_blank" 

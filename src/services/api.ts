@@ -129,6 +129,19 @@ export async function fetchAccountHistory(accountId: string, providerId: string)
   return data.history || [];
 }
 
+export async function refreshAccountHistory(accountId: string, providerId: string): Promise<HistoryLogItem[]> {
+  const res = await fetch(`/api/accounts/${accountId}/history/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ providerId })
+  });
+  if (!res.ok) {
+    throw new Error('Falha ao atualizar histórico de URLs');
+  }
+  const data = await res.json();
+  return data.history || [];
+}
+
 export async function clearAccountHistory(accountId: string, providerId: string): Promise<void> {
   const res = await fetch(`/api/accounts/${accountId}/history/clear`, {
     method: 'POST',

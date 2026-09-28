@@ -362,6 +362,74 @@ export class EnrichmentService {
     this.historyCache[key] = [];
     this.saveHistory();
   }
+
+  public resolvePath(filePath: string): string {
+    if (!filePath) return path.join(os.homedir(), '.config', 'google-chrome');
+    if (filePath.startsWith('~/') || filePath === '~') {
+      return path.join(os.homedir(), filePath.slice(1));
+    }
+    return path.resolve(filePath);
+  }
+
+  public getKeywordsForProvider(providerId: string): string[] {
+    const norm = this.normalizeProviderId(providerId);
+    switch (norm) {
+      case 'gemini':
+        return ['gemini.google.com', 'gemini', 'gemini-live', 'google'];
+      case 'openai':
+        return ['chatgpt.com', 'chatgpt', 'openai'];
+      case 'claude':
+        return ['claude.ai', 'claude', 'anthropic'];
+      case 'meta':
+        return ['meta.ai', 'meta', 'llama'];
+      case 'grok':
+        return ['grok.com', 'grok', 'spacex', 'x.com', 'x.ai', 'twitter'];
+      case 'ai_studios':
+        return ['aistudio.google.com', 'aistudio', 'google'];
+      default:
+        return [norm];
+    }
+  }
+
+  public async refreshHistory(accountId: string, providerId: string): Promise<HistoryLogItem[]> {
+    const normProviderId = this.normalizeProviderId(providerId);
+    const config = configManager.getConfig();
+    const account = config.accounts.find(a => a.id === accountId);
+    if (!account) {
+      throw new Error(`Conta com ID "${accountId}" não encontrada.`);
+    }
+
+    const defaultDir = path.join(os.homedir(), '.config', 'google-chrome');
+    const userDir = account.userDataDir ? this.resolvePath(account.userDataDir) : defaultDir;
+    const historyPath = path.join(userDir, account.chromeProfileDir, 'History');
+
+    if (!fs.existsSync(historyPath)) {
+      console.warn(`[EnrichmentService] Arquivo de histórico não existe em: ${historyPath}`);
+      return this.getHistory(accountId, normProviderId);
+    }
+
+    const keywords = this.getKeywordsForProvider(normProviderId);
+    
+    try {
+      const { execFileSync } = await import('child_process');
+      const scriptPath = path.resolve(process.cwd(), 'server', 'readHistory.py');
+      const output = execFileSync('python3', [scriptPath, historyPath, JSON.stringify(keywords)], { encoding: 'utf-8' });
+      const data = JSON.parse(output.trim());
+      
+      if (data.success && Array.isArray(data.history)) {
+        const key = `${accountId}:${normProviderId}`;
+        this.historyCache[key] = data.history;
+        this.saveHistory();
+        return data.history;
+      } else if (data.error) {
+        console.error('[EnrichmentService] Erro do script Python de histórico:', data.error);
+      }
+    } catch (err: any) {
+      console.error('[EnrichmentService] Erro ao executar script Python de histórico:', err.message);
+    }
+
+    return this.getHistory(accountId, normProviderId);
+  }
 }
 
 export const enrichmentService = new EnrichmentService();
