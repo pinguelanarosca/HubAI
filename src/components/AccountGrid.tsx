@@ -40,6 +40,23 @@ export const AccountGrid: React.FC<AccountGridProps> = ({
     loadEnrichments(false);
   }, [activeProvider.id, accounts.length]);
 
+  // Polling ativo quando qualquer conta estiver no estado 'syncing'
+  useEffect(() => {
+    const hasSyncing = accounts.some(acc => enrichments[acc.id]?.syncState === 'syncing');
+    if (!hasSyncing) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const data = await fetchAccountEnrichments(activeProvider.id, false);
+        setEnrichments(data || {});
+      } catch (err) {
+        console.warn('[AccountGrid] Erro ao atualizar enriquecimentos por polling:', err);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [accounts, enrichments, activeProvider.id]);
+
   const handleSyncAccount = async (accountId: string) => {
     setSyncingAccountId(accountId);
     try {

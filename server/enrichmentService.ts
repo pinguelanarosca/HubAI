@@ -206,6 +206,23 @@ export class EnrichmentService {
     }
 
     if (cached) {
+      if (cached.syncState === 'syncing') {
+        const syncKey = `${account.id}:${providerId}`;
+        const timestamp = this.pendingSyncs.get(syncKey);
+        if (!timestamp || (Date.now() - timestamp > 15000)) {
+          this.pendingSyncs.delete(syncKey);
+          cached.syncState = 'unavailable';
+          cached.syncMessage = 'Tempo limite esgotado. A aba da plataforma não respondeu.';
+          cached.usage = {
+            limitStatus: 'unknown',
+            limitLabel: '--',
+            resetTime: '--',
+            details: 'Certifique-se de que a aba da plataforma está aberta e ativa.'
+          };
+          this.cache[key] = cached;
+          this.saveCache();
+        }
+      }
       return cached;
     }
 

@@ -73,6 +73,9 @@ export const AccountCard: React.FC<AccountCardProps> = ({
   } else if (status?.syncState === 'error') {
     syncDot = '🔴';
     syncStateLabel = 'Erro de Coleta';
+  } else if (status?.syncState === 'syncing') {
+    syncDot = '🔄';
+    syncStateLabel = 'Sincronizando...';
   }
   if (isSyncing) {
     syncDot = '🔄';

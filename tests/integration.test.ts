@@ -499,7 +499,19 @@ async function runIntegrationTests() {
     assert.strictEqual(acc1SyncedStatus.profilePictureUrl, avatarUrl, 'Avatar real deve ser associado à conta correta!');
     assert.strictEqual(acc1SyncedStatus.syncState, 'synced', 'Status deve ser synced após relatório real!');
 
-    console.log('✓ PASSOU: Todas as 10 regras obrigatórias de ponte e sincronização validadas com 100% de sucesso.');
+    // Rule 11: O estado 'syncing' expira após o tempo limite e transiciona para 'unavailable'
+    enrichmentService.requestSync(targetAcc1.id, 'claude');
+    const syncingClaude = await enrichmentService.getAccountStatus(targetAcc1, 'claude', false);
+    assert.strictEqual(syncingClaude.syncState, 'syncing', 'Deve estar inicialmente em syncing');
+
+    // Force expiration by manipulating the pendingSyncs timestamp
+    const syncKey = `${targetAcc1.id}:claude`;
+    (enrichmentService as any).pendingSyncs.set(syncKey, Date.now() - 20000); // 20s ago
+    const expiredClaude = await enrichmentService.getAccountStatus(targetAcc1, 'claude', false);
+    assert.strictEqual(expiredClaude.syncState, 'unavailable', 'Após 15s o estado syncing deve expirar para unavailable!');
+    assert.ok(expiredClaude.syncMessage && expiredClaude.syncMessage.includes('Tempo limite esgotado'), 'Mensagem deve indicar tempo limite esgotado');
+
+    console.log('✓ PASSOU: Todas as 11 regras obrigatórias de ponte e sincronização validadas com 100% de sucesso.');
 
     console.log('\n================================================================');
     console.log('  TODOS OS 11 TESTES DE INTEGRAÇÃO & ATUALIZAÇÃO FORAM APROVADOS! ');
