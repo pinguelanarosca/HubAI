@@ -92,26 +92,35 @@ export class EnrichmentService {
     }
   }
 
+  public normalizeProviderId(providerId: string): string {
+    if (!providerId) return providerId;
+    const lower = providerId.toLowerCase();
+    if (lower === 'chatgpt') return 'openai';
+    if (lower === 'meta_ai') return 'meta';
+    return lower;
+  }
+
   /**
    * Registers a sync request for a given account and provider.
    * Sets syncState to 'syncing' and registers pending sync for bridge polling.
    */
   public requestSync(accountId: string, providerId: string): AccountStatus {
+    const normProviderId = this.normalizeProviderId(providerId);
     const config = configManager.getConfig();
     const account = config.accounts.find(a => a.id === accountId);
     if (!account) {
       throw new Error(`Conta com ID "${accountId}" não encontrada.`);
     }
 
-    const syncKey = `${accountId}:${providerId}`;
+    const syncKey = `${accountId}:${normProviderId}`;
     this.pendingSyncs.set(syncKey, Date.now());
 
-    const hasProjectsConcept = ['chatgpt', 'claude', 'openai'].includes(providerId);
+    const hasProjectsConcept = ['chatgpt', 'claude', 'openai'].includes(normProviderId);
     const existing = this.cache[syncKey];
 
     const syncingStatus: AccountStatus = {
       accountId: account.id,
-      providerId: providerId,
+      providerId: normProviderId,
       accountName: existing?.accountName || account.name || '--',
       accountEmail: existing?.accountEmail || account.email || '--',
       profilePictureUrl: existing?.profilePictureUrl,
@@ -140,7 +149,8 @@ export class EnrichmentService {
    * Checks if a sync request is pending for the given account and provider.
    */
   public isSyncPending(accountId: string, providerId: string): boolean {
-    const syncKey = `${accountId}:${providerId}`;
+    const normProviderId = this.normalizeProviderId(providerId);
+    const syncKey = `${accountId}:${normProviderId}`;
     const timestamp = this.pendingSyncs.get(syncKey);
     if (!timestamp) return false;
 
@@ -153,7 +163,8 @@ export class EnrichmentService {
   }
 
   public clearPendingSync(accountId: string, providerId: string) {
-    const syncKey = `${accountId}:${providerId}`;
+    const normProviderId = this.normalizeProviderId(providerId);
+    const syncKey = `${accountId}:${normProviderId}`;
     this.pendingSyncs.delete(syncKey);
   }
 
@@ -181,7 +192,8 @@ export class EnrichmentService {
       };
     }
 
-    const providerId = report.providerId;
+    const rawProviderId = report.providerId;
+    const providerId = this.normalizeProviderId(rawProviderId);
     const key = `${account.id}:${providerId}`;
     const pData = report.platformData || {};
     const now = report.extractedAt || new Date().toISOString();
@@ -247,16 +259,17 @@ export class EnrichmentService {
    * Returns AccountStatus for a given account and provider.
    */
   public async getAccountStatus(account: HubAccount, providerId: string, forceSync: boolean = false): Promise<AccountStatus> {
-    const key = `${account.id}:${providerId}`;
+    const normProviderId = this.normalizeProviderId(providerId);
+    const key = `${account.id}:${normProviderId}`;
     let cached = this.cache[key];
 
     if (forceSync) {
-      return this.requestSync(account.id, providerId);
+      return this.requestSync(account.id, normProviderId);
     }
 
     if (cached) {
       if (cached.syncState === 'syncing') {
-        const syncKey = `${account.id}:${providerId}`;
+        const syncKey = `${account.id}:${normProviderId}`;
         const timestamp = this.pendingSyncs.get(syncKey);
         if (!timestamp || (Date.now() - timestamp > 15000)) {
           this.pendingSyncs.delete(syncKey);
@@ -275,12 +288,12 @@ export class EnrichmentService {
       return cached;
     }
 
-    const hasProjectsConcept = ['chatgpt', 'claude', 'openai'].includes(providerId);
+    const hasProjectsConcept = ['chatgpt', 'claude', 'openai'].includes(normProviderId);
 
     // Default status when no DOM payload has been received yet
     const fallback: AccountStatus = {
       accountId: account.id,
-      providerId,
+      providerId: normProviderId,
       accountName: account.name || '--',
       accountEmail: account.email || '--',
       profilePictureUrl: undefined,
@@ -303,11 +316,12 @@ export class EnrichmentService {
   }
 
   public async getAllAccountsStatus(providerId: string = 'chatgpt', forceSync: boolean = false): Promise<Record<string, AccountStatus>> {
+    const normProviderId = this.normalizeProviderId(providerId);
     const config = configManager.getConfig();
     const result: Record<string, AccountStatus> = {};
 
     for (const account of config.accounts) {
-      result[account.id] = await this.getAccountStatus(account, providerId, forceSync);
+      result[account.id] = await this.getAccountStatus(account, normProviderId, forceSync);
     }
 
     return result;
@@ -315,17 +329,16 @@ export class EnrichmentService {
 
   public urlMatchesProvider(url: string, providerId: string): boolean {
     if (!url) return false;
+    const normProviderId = this.normalizeProviderId(providerId);
     const normalizedUrl = url.toLowerCase();
     
-    switch (providerId) {
+    switch (normProviderId) {
       case 'gemini':
         return normalizedUrl.includes('gemini') || normalizedUrl.includes('google');
-      case 'chatgpt':
       case 'openai':
         return normalizedUrl.includes('chatgpt') || normalizedUrl.includes('openai');
       case 'claude':
         return normalizedUrl.includes('claude') || normalizedUrl.includes('anthropic');
-      case 'meta_ai':
       case 'meta':
         return normalizedUrl.includes('meta') || normalizedUrl.includes('llama');
       case 'grok':
@@ -333,17 +346,19 @@ export class EnrichmentService {
       case 'ai_studios':
         return normalizedUrl.includes('aistudio') || normalizedUrl.includes('google');
       default:
-        return normalizedUrl.includes(providerId.toLowerCase());
+        return normalizedUrl.includes(normProviderId.toLowerCase());
     }
   }
 
   public getHistory(accountId: string, providerId: string): HistoryLogItem[] {
-    const key = `${accountId}:${providerId}`;
+    const normProviderId = this.normalizeProviderId(providerId);
+    const key = `${accountId}:${normProviderId}`;
     return this.historyCache[key] || [];
   }
 
   public clearHistory(accountId: string, providerId: string) {
-    const key = `${accountId}:${providerId}`;
+    const normProviderId = this.normalizeProviderId(providerId);
+    const key = `${accountId}:${normProviderId}`;
     this.historyCache[key] = [];
     this.saveHistory();
   }
