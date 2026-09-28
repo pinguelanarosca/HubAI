@@ -38,15 +38,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Zone 2: Navigation / Context breadcrumb */}
-      <div className="hidden lg:flex items-center gap-2 text-xs text-neutral-400">
-        <span className="text-neutral-500">Fluxo:</span>
-        <span className="text-neutral-200 font-medium">1. Provedor ({activeProvider?.shortName || 'Selecione'})</span>
-        <span className="text-neutral-600">→</span>
-        <span className="text-neutral-300 font-medium">2. Conta (9 Perfis Chrome)</span>
-        <span className="text-neutral-600">→</span>
-        <span className="text-neutral-400">3. Sessão Isolada</span>
-      </div>
+
 
       {/* Zone 3: Primary action buttons */}
       <div className="flex items-center gap-2">

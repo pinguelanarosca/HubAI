@@ -8,7 +8,6 @@ import { HubConfig, AIProvider, HubAccount, LaunchResult, DiagnosticReport, Upda
 import { fetchHubConfig, saveHubConfig, launchPlatform, runDiagnostics, fetchUpdateStatus } from './services/api.js';
 import { Header } from './components/Header.js';
 import { Sidebar } from './components/Sidebar.js';
-import { ProviderBanner } from './components/ProviderBanner.js';
 import { AccountGrid } from './components/AccountGrid.js';
 import { DiagnosticModal } from './components/DiagnosticModal.js';
 import { SettingsModal } from './components/SettingsModal.js';
@@ -187,13 +186,7 @@ export default function App() {
         {/* Center / Main Canvas */}
         <main className="flex-1 overflow-y-auto p-6 lg:p-8 bg-neutral-950">
           <div className="max-w-6xl mx-auto space-y-6">
-            {/* Active Provider Context Banner */}
-            {activeProvider && (
-              <ProviderBanner
-                provider={activeProvider}
-                accountCount={config.accounts.length}
-              />
-            )}
+
 
             {/* The 9 Account Cards */}
             {activeProvider && (
