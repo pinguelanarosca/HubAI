@@ -809,25 +809,90 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
 
               <div className="space-y-4">
-                <div className="p-4 bg-neutral-950 border border-neutral-800 rounded-xl space-y-2">
-                  <label className="text-xs font-semibold text-neutral-300 block">
-                    Comando do Executável do Navegador
-                  </label>
-                  <input
-                    type="text"
-                    value={localConfig.system.browserCommand}
-                    onChange={(e) =>
-                      setLocalConfig((prev) => ({
-                        ...prev,
-                        system: { ...prev.system, browserCommand: e.target.value }
-                      }))
-                    }
-                    placeholder="google-chrome, google-chrome-stable, chromium..."
-                    className="w-full text-xs font-mono text-neutral-200 bg-neutral-900 border border-neutral-700 rounded-lg p-2.5 focus:outline-none focus:border-neutral-500"
-                  />
-                  <span className="text-[11px] text-neutral-500 block">
-                    Binário que será executado pelo Linux (verificado no PATH ou caminho absoluto).
-                  </span>
+                <div className="p-4 bg-neutral-950 border border-neutral-800 rounded-xl space-y-3">
+                  <div>
+                    <label className="text-xs font-semibold text-neutral-300 block">
+                      Comando do Executável do Navegador
+                    </label>
+                    <input
+                      type="text"
+                      value={localConfig.system.browserCommand}
+                      onChange={(e) =>
+                        setLocalConfig((prev) => ({
+                          ...prev,
+                          system: { ...prev.system, browserCommand: e.target.value }
+                        }))
+                      }
+                      placeholder="google-chrome, google-chrome-stable, chromium..."
+                      className="w-full text-xs font-mono text-neutral-200 bg-neutral-900 border border-neutral-700 rounded-lg p-2.5 mt-1 focus:outline-none focus:border-neutral-500"
+                    />
+                    <span className="text-[11px] text-neutral-500 block mt-1">
+                      Binário que será executado pelo Linux (verificado no PATH do sistema ou caminho absoluto).
+                    </span>
+                  </div>
+
+                  {/* Detected Linux Browsers Quick Selector */}
+                  {browserVariants && browserVariants.length > 0 && (
+                    <div className="pt-2 border-t border-neutral-800 space-y-2">
+                      <span className="text-[11px] font-semibold text-neutral-400 block">
+                        Navegadores instalados detectados no seu Linux:
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {browserVariants.map((v) => {
+                          const activeBinary = v.detectedBinary || (v.exists ? v.binaryCommand : undefined);
+                          const isCurrentlySelected = activeBinary && localConfig.system.browserCommand === activeBinary;
+
+                          return (
+                            <div
+                              key={v.id}
+                              className={`p-2 rounded-lg border text-xs flex items-center justify-between gap-2 transition-colors ${
+                                activeBinary
+                                  ? isCurrentlySelected
+                                    ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300'
+                                    : 'bg-neutral-900/80 border-neutral-800 text-neutral-300'
+                                  : 'bg-neutral-950/40 border-neutral-900 text-neutral-600'
+                              }`}
+                            >
+                              <div className="min-w-0">
+                                <div className="font-semibold text-[11px] truncate">{v.name}</div>
+                                <div className="font-mono text-[10px] opacity-75 truncate">
+                                  {activeBinary || v.binaryCommand}
+                                </div>
+                              </div>
+
+                              {activeBinary ? (
+                                isCurrentlySelected ? (
+                                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950 px-2 py-0.5 rounded border border-emerald-800 shrink-0 font-medium">
+                                    Ativo
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={() => {
+                                      setLocalConfig((prev) => ({
+                                        ...prev,
+                                        system: {
+                                          ...prev.system,
+                                          browserCommand: activeBinary,
+                                          chromeUserDataDir: v.userDataDir || prev.system.chromeUserDataDir
+                                        }
+                                      }));
+                                    }}
+                                    className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-[10px] font-medium rounded border border-neutral-700 transition-colors shrink-0"
+                                  >
+                                    Usar Este
+                                  </button>
+                                )
+                              ) : (
+                                <span className="text-[10px] font-mono text-neutral-600 shrink-0">
+                                  Não detectado
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="p-4 bg-neutral-950 border border-neutral-800 rounded-xl space-y-2">

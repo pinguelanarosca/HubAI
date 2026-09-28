@@ -25,6 +25,43 @@ export interface HubAccount {
   lastUsedAt?: string;
 }
 
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  description?: string;
+  updatedAt?: string;
+}
+
+export interface ChatSummary {
+  id: string;
+  title: string;
+  timeOrDate: string; // e.g. "13:02", "11:47", "Ontem"
+  url?: string;
+}
+
+export interface UsageStatus {
+  limitStatus: 'available' | 'exceeded' | 'warning' | 'unknown';
+  limitLabel: string; // e.g. "Disponível", "Excedido", "Não informado"
+  resetTime?: string; // e.g. "--", "14:00", "Amanhã 03:00"
+  details?: string;
+}
+
+export interface AccountStatus {
+  accountId: string;
+  providerId: string;
+  accountName?: string;
+  accountEmail?: string;
+  profilePictureUrl?: string; // real avatar photo URL or base64 data URL
+  planName: string; // e.g. "FREE", "Plus", "Pro"
+  projects: ProjectSummary[];
+  hasProjectsConcept: boolean; // true if platform supports projects
+  recentChats: ChatSummary[];
+  usage: UsageStatus;
+  lastSyncAt: string;
+  syncState: 'synced' | 'syncing' | 'cached' | 'error' | 'unavailable';
+  syncMessage?: string;
+}
+
 export interface SystemConfig {
   browserCommand: string; // e.g. "google-chrome", "google-chrome-stable", "chromium", "brave-browser"
   chromeUserDataDir: string; // e.g. "~/.config/google-chrome"

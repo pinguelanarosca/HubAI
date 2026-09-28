@@ -359,8 +359,32 @@ async function runIntegrationTests() {
     assert.deepStrictEqual(reloadedAfter.accounts, currentConfigBefore.accounts);
     console.log('✓ PASSOU: Diretório de configurações do usuário é 100% preservado.');
 
+    // -------------------------------------------------------------------------
+    // TESTE 11: Testando serviço de enriquecimento de sessão de contas (EnrichmentService)
+    // -------------------------------------------------------------------------
+    console.log('[TESTE 11] Testando serviço de enriquecimento de sessão de contas (EnrichmentService)...');
+    const { enrichmentService } = await import('../server/enrichmentService.js');
+    const testAccount = currentConfigBefore.accounts[0];
+    assert.ok(testAccount, 'Deve haver ao menos uma conta no config de teste');
+
+    const chatgptStatus = await enrichmentService.getAccountStatus(testAccount, 'chatgpt', true);
+    assert.strictEqual(chatgptStatus.accountId, testAccount.id);
+    assert.strictEqual(chatgptStatus.providerId, 'chatgpt');
+    assert.strictEqual(chatgptStatus.planName, 'FREE');
+    assert.strictEqual(chatgptStatus.hasProjectsConcept, true);
+    assert.ok(Array.isArray(chatgptStatus.projects), 'Deve conter lista de projetos');
+    assert.ok(Array.isArray(chatgptStatus.recentChats), 'Deve conter lista de chats recentes');
+    assert.ok(chatgptStatus.usage, 'Deve conter informações de cota/uso');
+    assert.strictEqual(chatgptStatus.usage.limitLabel, 'Disponível');
+
+    const geminiStatus = await enrichmentService.getAccountStatus(testAccount, 'gemini', true);
+    assert.strictEqual(geminiStatus.hasProjectsConcept, false, 'Gemini não possui conceito de projetos');
+    assert.strictEqual(geminiStatus.projects.length, 0);
+
+    console.log('✓ PASSOU: Estrutura de dados e adaptadores de enriquecimento validados com sucesso.');
+
     console.log('\n================================================================');
-    console.log('  TODOS OS 10 TESTES DE INTEGRAÇÃO & ATUALIZAÇÃO FORAM APROVADOS! ');
+    console.log('  TODOS OS 11 TESTES DE INTEGRAÇÃO & ATUALIZAÇÃO FORAM APROVADOS! ');
     console.log('================================================================\n');
   } finally {
     // Limpeza de ambiente temporário

@@ -46,9 +46,18 @@ export class LauncherService {
       }
       return whichOut;
     } catch {
+      let extraInfo = 'Instale o Google Chrome (sudo apt install google-chrome-stable / chromium-browser) ou selecione um navegador instalado nas configurações do Hub.';
+      try {
+        const detected = profileScanner.detectBrowserBinaries();
+        if (detected && detected.length > 0) {
+          extraInfo = `Navegadores instalados detectados no seu Linux: [${detected.join(', ')}]. Selecione um nas Configurações do Hub.`;
+        }
+      } catch {
+        // Ignore detection errors in catch
+      }
+
       throw new Error(
-        `O executável do navegador configurado ("${cleanCmd}") não foi encontrado no PATH do sistema. ` +
-        `Instale o Google Chrome ou configure um executável compatível nas configurações do Hub.`
+        `O executável do navegador configurado ("${cleanCmd}") não foi encontrado no PATH do sistema. ${extraInfo}`
       );
     }
   }

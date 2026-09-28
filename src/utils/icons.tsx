@@ -40,7 +40,9 @@ import {
   ArrowRight,
   ChevronDown,
   ChevronUp,
-  Clock
+  Clock,
+  MessageSquare,
+  RotateCw
 } from 'lucide-react';
 
 export {
@@ -84,7 +86,9 @@ export {
   ArrowRight,
   ChevronDown,
   ChevronUp,
-  Clock
+  Clock,
+  MessageSquare,
+  RotateCw
 };
 
 export const ProviderIcons: Record<string, React.ComponentType<{ className?: string }>> = {

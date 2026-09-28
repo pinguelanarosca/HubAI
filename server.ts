@@ -9,6 +9,7 @@ import { profileScanner } from './server/profileScanner.js';
 import { diagnosticService } from './server/diagnosticService.js';
 import { launcherService } from './server/launcherService.js';
 import { updateService } from './server/updateService.js';
+import { enrichmentService } from './server/enrichmentService.js';
 import { HubConfig } from './src/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -115,6 +116,36 @@ async function startServer() {
     try {
       const variants = profileScanner.detectBrowserVariants();
       res.json({ success: true, variants });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 2b. Account Enrichment & Session Status Endpoints
+  app.get('/api/accounts/enrichment', async (req, res) => {
+    try {
+      const providerId = (req.query.providerId as string) || 'chatgpt';
+      const force = req.query.force === 'true';
+      const statuses = await enrichmentService.getAllAccountsStatus(providerId, force);
+      res.json({ success: true, statuses });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/accounts/:id/sync', async (req, res) => {
+    try {
+      const accountId = req.params.id;
+      const providerId = req.body.providerId || 'chatgpt';
+      const config = configManager.getConfig();
+      const account = config.accounts.find(a => a.id === accountId);
+
+      if (!account) {
+        return res.status(404).json({ success: false, error: `Conta com ID "${accountId}" não encontrada.` });
+      }
+
+      const status = await enrichmentService.getAccountStatus(account, providerId, true);
+      res.json({ success: true, status });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }

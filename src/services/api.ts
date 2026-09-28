@@ -8,7 +8,8 @@ import {
   ProfileImportBinding,
   BrowserVariant,
   UpdateStatus,
-  UpdateApplyResult
+  UpdateApplyResult,
+  AccountStatus
 } from '../types.js';
 
 export async function fetchHubConfig(): Promise<HubConfig> {
@@ -198,5 +199,28 @@ export async function requestSystemUninstall(purge: boolean = false): Promise<{
     throw new Error(data.error || 'Falha ao acionar desinstalação');
   }
   return data;
+}
+
+export async function fetchAccountEnrichments(providerId: string = 'chatgpt', force: boolean = false): Promise<Record<string, AccountStatus>> {
+  const url = `/api/accounts/enrichment?providerId=${encodeURIComponent(providerId)}${force ? '&force=true' : ''}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error('Falha ao carregar informações enriquecidas das contas');
+  }
+  const data = await res.json();
+  return data.statuses;
+}
+
+export async function syncAccountStatus(accountId: string, providerId: string = 'chatgpt'): Promise<AccountStatus> {
+  const res = await fetch(`/api/accounts/${accountId}/sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ providerId })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Falha ao sincronizar conta');
+  }
+  return data.status;
 }
 

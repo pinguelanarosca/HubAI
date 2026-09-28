@@ -76,16 +76,17 @@ export const LaunchNotification: React.FC<LaunchNotificationProps> = ({
             <span>{result.message}</span>
           </div>
           {onOpenSettings && (
-            <div className="pt-1.5 border-t border-rose-900/40 flex items-center justify-between">
+            <div className="pt-2 border-t border-rose-900/40 flex items-center justify-between">
+              <span className="text-[10px] text-rose-300/80">Acesse o painel do sistema para selecionar um navegador instalado.</span>
               <button
                 onClick={() => {
                   onDismiss();
                   onOpenSettings();
                 }}
-                className="text-[11px] font-medium text-rose-200 hover:text-white flex items-center gap-1.5 underline underline-offset-2 transition-colors"
+                className="px-2.5 py-1 bg-rose-900/80 hover:bg-rose-900 text-white rounded text-[11px] font-medium flex items-center gap-1.5 transition-colors shrink-0"
               >
                 <Settings className="w-3.5 h-3.5" />
-                <span>Configurar Navegador / Sincronizar Perfis</span>
+                <span>Configurar Navegador</span>
               </button>
             </div>
           )}

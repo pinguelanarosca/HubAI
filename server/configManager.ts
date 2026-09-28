@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { HubConfig, HubAccount, AIProvider } from '../src/types.js';
 import { defaultHubConfig } from './defaultConfig.js';
@@ -159,8 +160,60 @@ export class ConfigManager {
     };
   }
 
+  private autoDetectAndRepairBrowserCommand(cfg: HubConfig): HubConfig {
+    if (!cfg || !cfg.system || !cfg.system.browserCommand) return cfg;
+
+    const cmd = cfg.system.browserCommand.trim();
+    if (!cmd) return cfg;
+
+    // Check if current command exists on PATH or filesystem
+    try {
+      if (!cmd.includes('/')) {
+        const check = execSync(`which ${cmd} 2>/dev/null`, { encoding: 'utf-8' }).trim();
+        if (check) return cfg;
+      } else {
+        if (fs.existsSync(cmd)) return cfg;
+      }
+    } catch {
+      // Command missing on PATH
+    }
+
+    // Attempt to auto-detect an installed browser binary on host
+    try {
+      const candidates = [
+        'google-chrome-stable',
+        'google-chrome',
+        'chromium',
+        'chromium-browser',
+        'brave-browser',
+        'brave',
+        'microsoft-edge',
+        'microsoft-edge-stable'
+      ];
+      for (const cand of candidates) {
+        try {
+          const found = execSync(`which ${cand} 2>/dev/null`, { encoding: 'utf-8' }).trim();
+          if (found) {
+            console.log(`[ConfigManager] O executável configurado "${cmd}" não foi encontrado no PATH, mas "${cand}" foi detectado. Auto-configurando "${cand}".`);
+            cfg.system.browserCommand = cand;
+            this.saveConfig(cfg);
+            break;
+          }
+        } catch {
+          // Candidate not in PATH
+        }
+      }
+    } catch (err) {
+      console.warn('[ConfigManager] Aviso ao verificar navegadores alternativos:', err);
+    }
+
+    return cfg;
+  }
+
   public loadConfig(): HubConfig {
     this.ensureConfigDir();
+
+    let resolvedConfig: HubConfig = defaultHubConfig;
 
     // 1. Check user standard config directory ~/.config/hubai/hub-config.json
     if (fs.existsSync(this.configFile)) {
@@ -170,7 +223,7 @@ export class ConfigManager {
         const validation = this.validateConfig(parsed);
 
         if (validation.valid) {
-          return parsed as HubConfig;
+          resolvedConfig = parsed as HubConfig;
         } else {
           console.error('[ConfigManager] Configuração em ~/.config/hubai contém erros de validação:', validation.errors);
           console.warn('[ConfigManager] Carregando configuração padrão segura.');
@@ -179,9 +232,8 @@ export class ConfigManager {
         console.error('[ConfigManager] Erro ao ler JSON de configuração em ~/.config/hubai:', err);
       }
     }
-
     // 2. Migration: If ~/.config/hubai/hub-config.json does not exist, check legacy project data/hub-config.json
-    if (fs.existsSync(this.legacyConfigFile)) {
+    else if (fs.existsSync(this.legacyConfigFile)) {
       try {
         const rawLegacy = fs.readFileSync(this.legacyConfigFile, 'utf-8');
         const parsedLegacy = JSON.parse(rawLegacy);
@@ -190,16 +242,18 @@ export class ConfigManager {
         if (validation.valid) {
           console.log('[ConfigManager] Migrando configuração existente de data/hub-config.json para ~/.config/hubai/hub-config.json...');
           this.saveConfig(parsedLegacy as HubConfig);
-          return parsedLegacy as HubConfig;
+          resolvedConfig = parsedLegacy as HubConfig;
         }
       } catch (legacyErr) {
         console.warn('[ConfigManager] Erro ao tentar migrar configuração legada:', legacyErr);
       }
+    } else {
+      // 3. Fallback: Save initial clean default config to ~/.config/hubai/hub-config.json
+      this.saveConfig(defaultHubConfig);
+      resolvedConfig = defaultHubConfig;
     }
 
-    // 3. Fallback: Save initial clean default config to ~/.config/hubai/hub-config.json
-    this.saveConfig(defaultHubConfig);
-    return defaultHubConfig;
+    return this.autoDetectAndRepairBrowserCommand(resolvedConfig);
   }
 
   public getConfig(): HubConfig {
