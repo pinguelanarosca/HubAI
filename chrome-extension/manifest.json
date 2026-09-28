@@ -38,5 +38,11 @@
   "action": {
     "default_title": "HubAI Collector",
     "default_popup": "popup.html"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["bridge-config.json"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

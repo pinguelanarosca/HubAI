@@ -419,6 +419,88 @@ async function runIntegrationTests() {
 
     console.log('✓ PASSOU: Ponte de coleta DOM e atualização de estado validadas com sucesso.');
 
+    // -------------------------------------------------------------------------
+    // TESTE 12: Validação rigorosa das 10 regras obrigatórias da Ponte de Coleta
+    // -------------------------------------------------------------------------
+    console.log('[TESTE 12] Verificando as 10 regras obrigatórias da Ponte e Sincronização...');
+
+    // Rule 1: Relatório sem accountId é rejeitado
+    const noAccountReport = {
+      providerId: 'chatgpt',
+      accountId: '',
+      extractedAt: new Date().toISOString(),
+      platformData: { planName: 'Plus' }
+    };
+    const res1 = enrichmentService.processBridgeReport(noAccountReport as any);
+    assert.strictEqual(res1.success, false, 'Relatório sem accountId DEVE ser rejeitado!');
+
+    // Rule 2 & 3: Relatório com conta desconhecida NÃO cai na primeira conta; Conta 2 atualiza somente Conta 2
+    const currentAccounts = configManager.getConfig().accounts;
+    const targetAcc1 = currentAccounts[0];
+    const targetAcc2 = currentAccounts.length > 1 ? currentAccounts[1] : { id: 'acc_2', name: 'Conta 2 Teste', chromeProfileDir: 'Profile 2' };
+
+    const initialAcc1Status = await enrichmentService.getAccountStatus(targetAcc1, 'chatgpt', false);
+    const unknownAccReport = {
+      providerId: 'chatgpt',
+      accountId: 'conta_totalmente_fantasma_999',
+      extractedAt: new Date().toISOString(),
+      platformData: { planName: 'Pro' }
+    };
+    const res2 = enrichmentService.processBridgeReport(unknownAccReport as any);
+    assert.strictEqual(res2.success, false, 'Relatório para conta desconhecida deve ser rejeitado!');
+
+    const afterUnknownStatus = await enrichmentService.getAccountStatus(targetAcc1, 'chatgpt', false);
+    assert.strictEqual(afterUnknownStatus.lastSyncAt, initialAcc1Status.lastSyncAt, 'Conta 1 NÃO pode ser alterada por relatório de outra conta!');
+
+    // Rule 4 & 5: Botão Sincronizar dispara solicitação de coleta (requestSync) e registra pending sync
+    const syncReqStatus = enrichmentService.requestSync(targetAcc1.id, 'chatgpt');
+    assert.strictEqual(syncReqStatus.syncState, 'syncing');
+    assert.strictEqual(enrichmentService.isSyncPending(targetAcc1.id, 'chatgpt'), true, 'Solicitação de sincronização deve estar pendente!');
+
+    // Rule 6: Porta configurada é utilizada no bridge-config.json gerado pelo launcher
+    const { prepareAccountBridgeDir } = await import('../server/launcherService.js');
+    const bridgeFolder = prepareAccountBridgeDir(targetAcc1.id, 9090);
+    const bridgeCfgPath = path.join(bridgeFolder, 'bridge-config.json');
+    assert.strictEqual(fs.existsSync(bridgeCfgPath), true, 'bridge-config.json deve existir');
+    const bridgeCfgJson = JSON.parse(fs.readFileSync(bridgeCfgPath, 'utf-8'));
+    assert.strictEqual(bridgeCfgJson.accountId, targetAcc1.id);
+    assert.ok(bridgeCfgJson.serverUrl.includes('9090'), 'A porta 9090 configurada deve estar presente no serverUrl!');
+
+    // Rule 7: :contains() não existe em content.js
+    const contentJsPath = path.resolve(process.cwd(), 'chrome-extension', 'content.js');
+    const contentJsText = fs.readFileSync(contentJsPath, 'utf-8');
+    assert.strictEqual(contentJsText.includes(':contains('), false, 'O seletor inválido :contains() NUNCA deve existir no content.js!');
+
+    // Rule 8: Ausência de dados resulta em '--'
+    const emptyAccount: any = { id: 'acc_vazia_test', name: 'Conta Vazia', chromeProfileDir: 'Profile 99' };
+    const emptyStatus = await enrichmentService.getAccountStatus(emptyAccount, 'chatgpt', false);
+    assert.strictEqual(emptyStatus.planName, '--');
+    assert.strictEqual(emptyStatus.usage.limitLabel, '--');
+    assert.strictEqual(emptyStatus.usage.resetTime, '--');
+
+    // Rule 9: synced só ocorre após coleta real do DOM
+    assert.strictEqual(emptyStatus.syncState, 'unavailable', 'Sem coleta real o status deve ser unavailable!');
+
+    // Rule 10: Avatar fica associado à conta correta
+    const avatarUrl = 'https://lh3.googleusercontent.com/a/real-photo-acc1.png';
+    const acc1RealReport = {
+      providerId: 'chatgpt',
+      accountId: targetAcc1.id,
+      extractedAt: new Date().toISOString(),
+      platformData: {
+        accountName: 'Alexandre Autêntico',
+        profilePictureUrl: avatarUrl,
+        planName: 'Plus'
+      }
+    };
+    const resAcc1 = enrichmentService.processBridgeReport(acc1RealReport as any);
+    assert.strictEqual(resAcc1.success, true);
+    const acc1SyncedStatus = await enrichmentService.getAccountStatus(targetAcc1, 'chatgpt', false);
+    assert.strictEqual(acc1SyncedStatus.profilePictureUrl, avatarUrl, 'Avatar real deve ser associado à conta correta!');
+    assert.strictEqual(acc1SyncedStatus.syncState, 'synced', 'Status deve ser synced após relatório real!');
+
+    console.log('✓ PASSOU: Todas as 10 regras obrigatórias de ponte e sincronização validadas com 100% de sucesso.');
+
     console.log('\n================================================================');
     console.log('  TODOS OS 11 TESTES DE INTEGRAÇÃO & ATUALIZAÇÃO FORAM APROVADOS! ');
     console.log('================================================================\n');

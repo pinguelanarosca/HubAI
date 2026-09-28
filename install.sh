@@ -63,6 +63,7 @@ if [ -f "$SCRIPT_DIR/package.json" ] && [ -f "$SCRIPT_DIR/server.ts" ]; then
   cp -r "$SCRIPT_DIR/server" "$INSTALL_DIR/" 2>/dev/null || true
   cp -r "$SCRIPT_DIR/scripts" "$INSTALL_DIR/" 2>/dev/null || true
   cp -r "$SCRIPT_DIR/public" "$INSTALL_DIR/" 2>/dev/null || true
+  cp -r "$SCRIPT_DIR/chrome-extension" "$INSTALL_DIR/" 2>/dev/null || true
   cp "$SCRIPT_DIR/package.json" "$INSTALL_DIR/" 2>/dev/null || true
   cp "$SCRIPT_DIR/package-lock.json" "$INSTALL_DIR/" 2>/dev/null || true
   cp "$SCRIPT_DIR/tsconfig.json" "$INSTALL_DIR/" 2>/dev/null || true

@@ -2,9 +2,63 @@ import { spawn, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { fileURLToPath } from 'url';
 import { configManager, ConfigManager } from './configManager.js';
 import { profileScanner } from './profileScanner.js';
 import { LaunchRequest, LaunchResult } from '../src/types.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+export function resolveExtensionSourceDir(): string {
+  const candidates = [
+    path.resolve(process.cwd(), 'chrome-extension'),
+    path.resolve(__dirname, '../chrome-extension'),
+    path.resolve(__dirname, './chrome-extension'),
+    path.join(os.homedir(), '.local', 'share', 'hubai', 'chrome-extension')
+  ];
+  for (const cand of candidates) {
+    if (fs.existsSync(cand) && fs.existsSync(path.join(cand, 'manifest.json'))) {
+      return cand;
+    }
+  }
+  return candidates[0];
+}
+
+export function prepareAccountBridgeDir(accountId: string, serverPort?: number | string): string {
+  const sourceDir = resolveExtensionSourceDir();
+  const configDir = process.env.HUBAI_CONFIG_DIR || path.join(os.homedir(), '.config', 'hubai');
+  const targetDir = path.join(configDir, 'bridges', accountId);
+
+  fs.mkdirSync(targetDir, { recursive: true });
+
+  if (fs.existsSync(sourceDir)) {
+    const files = fs.readdirSync(sourceDir);
+    for (const file of files) {
+      const srcFile = path.join(sourceDir, file);
+      const dstFile = path.join(targetDir, file);
+      if (fs.existsSync(srcFile) && fs.statSync(srcFile).isFile()) {
+        fs.copyFileSync(srcFile, dstFile);
+      }
+    }
+  }
+
+  const hostPort = serverPort || process.env.PORT || 8080;
+  const serverUrl = `http://127.0.0.1:${hostPort}`;
+
+  const bridgeConfig = {
+    accountId,
+    serverUrl
+  };
+
+  fs.writeFileSync(
+    path.join(targetDir, 'bridge-config.json'),
+    JSON.stringify(bridgeConfig, null, 2),
+    'utf-8'
+  );
+
+  return targetDir;
+}
 
 export class LauncherService {
   private configManager: ConfigManager;
@@ -193,10 +247,10 @@ export class LauncherService {
     const browserCommand = config.system.browserCommand || 'google-chrome';
     const openInNewWindow = config.system.openInNewWindow !== false;
     const baseExtraFlags = config.system.additionalFlags || ['--no-first-run'];
-    const extensionDir = path.resolve(process.cwd(), 'chrome-extension');
+    const accountBridgeDir = prepareAccountBridgeDir(account.id, process.env.PORT || 8080);
     const extraFlags = [...baseExtraFlags];
-    if (fs.existsSync(extensionDir) && !extraFlags.some(f => f.startsWith('--load-extension='))) {
-      extraFlags.push(`--load-extension=${extensionDir}`);
+    if (!extraFlags.some(f => f.startsWith('--load-extension='))) {
+      extraFlags.push(`--load-extension=${accountBridgeDir}`);
     }
 
     // 1. STRICT VALIDATION: Check that the configured browser executable actually exists!

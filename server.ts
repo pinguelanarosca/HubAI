@@ -166,7 +166,24 @@ async function startServer() {
     try {
       const report = req.body;
       const result = enrichmentService.processBridgeReport(report);
+      if (!result.success) {
+        return res.status(400).json(result);
+      }
       res.json({ success: true, result });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/bridge/pending-sync', (req, res) => {
+    try {
+      const accountId = req.query.accountId as string;
+      const providerId = req.query.providerId as string;
+      if (!accountId || !providerId) {
+        return res.status(400).json({ success: false, error: 'accountId e providerId são obrigatórios' });
+      }
+      const pending = enrichmentService.isSyncPending(accountId, providerId);
+      res.json({ success: true, pending });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -186,7 +203,7 @@ async function startServer() {
   app.post('/api/accounts/:id/sync', async (req, res) => {
     try {
       const accountId = req.params.id;
-      const providerId = req.body.providerId || 'chatgpt';
+      const providerId = req.body.providerId || req.query.providerId || 'chatgpt';
       const config = configManager.getConfig();
       const account = config.accounts.find(a => a.id === accountId);
 
@@ -194,7 +211,7 @@ async function startServer() {
         return res.status(404).json({ success: false, error: `Conta com ID "${accountId}" não encontrada.` });
       }
 
-      const status = await enrichmentService.getAccountStatus(account, providerId, true);
+      const status = enrichmentService.requestSync(accountId, providerId as string);
       res.json({ success: true, status });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });

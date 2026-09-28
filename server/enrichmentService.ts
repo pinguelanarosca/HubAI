@@ -23,7 +23,7 @@ export interface BridgePlatformData {
 
 export interface BridgeSyncReport {
   providerId: string;
-  accountId?: string;
+  accountId: string;
   chromeProfileDir?: string;
   url?: string;
   extractedAt: string;
@@ -33,6 +33,7 @@ export interface BridgeSyncReport {
 export class EnrichmentService {
   private cacheFile: string;
   private cache: Record<string, AccountStatus> = {}; // key: `${accountId}:${providerId}`
+  private pendingSyncs: Map<string, number> = new Map(); // key: `${accountId}:${providerId}`, value: timestamp
 
   constructor() {
     const configDir = process.env.HUBAI_CONFIG_DIR || path.join(os.homedir(), '.config', 'hubai');
@@ -64,26 +65,92 @@ export class EnrichmentService {
   }
 
   /**
-   * Processes a real DOM payload sent from the Chrome Extension / Web Bridge
-   * attached to the authenticated tab of an AI platform.
+   * Registers a sync request for a given account and provider.
+   * Sets syncState to 'syncing' and registers pending sync for bridge polling.
    */
-  public processBridgeReport(report: BridgeSyncReport): { success: boolean; accountId?: string; status?: AccountStatus } {
+  public requestSync(accountId: string, providerId: string): AccountStatus {
     const config = configManager.getConfig();
-
-    // Match account by accountId OR by active provider
-    let account = config.accounts.find(a => a.id === report.accountId);
+    const account = config.accounts.find(a => a.id === accountId);
     if (!account) {
-      // Find account matching chromeProfileDir or first account
-      if (report.chromeProfileDir) {
-        account = config.accounts.find(a => a.chromeProfileDir === report.chromeProfileDir);
-      }
-      if (!account && config.accounts.length > 0) {
-        account = config.accounts[0];
-      }
+      throw new Error(`Conta com ID "${accountId}" não encontrada.`);
     }
 
+    const syncKey = `${accountId}:${providerId}`;
+    this.pendingSyncs.set(syncKey, Date.now());
+
+    const hasProjectsConcept = ['chatgpt', 'claude', 'openai'].includes(providerId);
+    const existing = this.cache[syncKey];
+
+    const syncingStatus: AccountStatus = {
+      accountId: account.id,
+      providerId: providerId,
+      accountName: existing?.accountName || account.name || '--',
+      accountEmail: existing?.accountEmail || account.email || '--',
+      profilePictureUrl: existing?.profilePictureUrl,
+      planName: existing?.planName || '--',
+      hasProjectsConcept,
+      projects: existing?.projects || [],
+      recentChats: existing?.recentChats || [],
+      usage: existing?.usage || {
+        limitStatus: 'unknown',
+        limitLabel: '--',
+        resetTime: '--',
+        details: 'Aguardando coleta na aba do Chrome...'
+      },
+      lastSyncAt: existing?.lastSyncAt || '--',
+      syncState: 'syncing',
+      syncMessage: 'Sincronizando... Solicitação enviada à aba aberta do Chrome'
+    };
+
+    this.cache[syncKey] = syncingStatus;
+    this.saveCache();
+
+    return syncingStatus;
+  }
+
+  /**
+   * Checks if a sync request is pending for the given account and provider.
+   */
+  public isSyncPending(accountId: string, providerId: string): boolean {
+    const syncKey = `${accountId}:${providerId}`;
+    const timestamp = this.pendingSyncs.get(syncKey);
+    if (!timestamp) return false;
+
+    // Expire sync requests after 60 seconds
+    if (Date.now() - timestamp > 60000) {
+      this.pendingSyncs.delete(syncKey);
+      return false;
+    }
+    return true;
+  }
+
+  public clearPendingSync(accountId: string, providerId: string) {
+    const syncKey = `${accountId}:${providerId}`;
+    this.pendingSyncs.delete(syncKey);
+  }
+
+  /**
+   * Processes a real DOM payload sent from the Chrome Extension / Web Bridge
+   * attached to the authenticated tab of an AI platform.
+   *
+   * STRICT SECURITY: Rejects any report without a valid matching accountId.
+   */
+  public processBridgeReport(report: BridgeSyncReport): { success: boolean; accountId?: string; status?: AccountStatus; error?: string } {
+    if (!report || !report.accountId || typeof report.accountId !== 'string') {
+      return {
+        success: false,
+        error: 'Relatório rejeitado: accountId ausente ou inválido.'
+      };
+    }
+
+    const config = configManager.getConfig();
+    const account = config.accounts.find(a => a.id === report.accountId);
+
     if (!account) {
-      return { success: false };
+      return {
+        success: false,
+        error: `Relatório rejeitado: conta com ID "${report.accountId}" não foi encontrada no HubAI.`
+      };
     }
 
     const providerId = report.providerId;
@@ -114,10 +181,11 @@ export class EnrichmentService {
       syncMessage: `Sincronizado em tempo real da página (${new Date(now).toLocaleTimeString()})`
     };
 
+    this.clearPendingSync(account.id, providerId);
     this.cache[key] = updatedStatus;
     this.saveCache();
 
-    console.log(`[EnrichmentService] Relatório DOM recebido para conta "${account.name}" (${providerId}):`, updatedStatus);
+    console.log(`[EnrichmentService] Relatório DOM verificado para conta "${account.name}" (${providerId}):`, updatedStatus);
 
     return {
       success: true,
@@ -128,25 +196,20 @@ export class EnrichmentService {
 
   /**
    * Returns AccountStatus for a given account and provider.
-   * If a real bridge report has been received, returns the real collected data.
-   * Otherwise returns a clean status indicating waiting for active tab connection with '--' for missing fields.
    */
   public async getAccountStatus(account: HubAccount, providerId: string, forceSync: boolean = false): Promise<AccountStatus> {
     const key = `${account.id}:${providerId}`;
-    const cached = this.cache[key];
+    let cached = this.cache[key];
 
-    if (cached && !forceSync) {
+    if (forceSync) {
+      return this.requestSync(account.id, providerId);
+    }
+
+    if (cached) {
       return cached;
     }
 
     const hasProjectsConcept = ['chatgpt', 'claude', 'openai'].includes(providerId);
-
-    if (cached && forceSync) {
-      // Preserve last valid state on sync attempt if no new live bridge payload was sent yet
-      cached.syncState = 'cached';
-      cached.syncMessage = 'Aguardando atualização da página autenticada no Chrome';
-      return cached;
-    }
 
     // Default status when no DOM payload has been received yet
     const fallback: AccountStatus = {

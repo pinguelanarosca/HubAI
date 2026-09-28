@@ -6,11 +6,35 @@
  * STRICT INTEGRITY RULES:
  * 1. Only extract visible DOM elements legitimately exposed in the user session UI.
  * 2. Never extract or copy passwords, cookies, auth tokens, or private secrets.
- * 3. Never fabricate or invent missing data - return undefined for unexposed fields.
+ * 3. Never fabricate or invent missing data - return undefined or '--' for unexposed fields.
+ * 4. Never use invalid CSS selectors like pseudo-contains.
  */
 
 (function () {
   console.log('[HubAI Collector] Inicializado na página:', window.location.href);
+
+  let bridgeConfig = {
+    accountId: null,
+    serverUrl: 'http://127.0.0.1:8080'
+  };
+
+  async function loadBridgeConfig() {
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL) {
+      try {
+        const cfgUrl = chrome.runtime.getURL('bridge-config.json');
+        const res = await fetch(cfgUrl);
+        if (res.ok) {
+          const json = await res.json();
+          if (json && json.accountId) {
+            bridgeConfig = json;
+            console.log('[HubAI Collector] Configuração de bridge vinculada:', bridgeConfig);
+          }
+        }
+      } catch (err) {
+        console.warn('[HubAI Collector] Não foi possível ler bridge-config.json:', err.message);
+      }
+    }
+  }
 
   function getProviderIdFromUrl(url) {
     if (url.includes('chatgpt.com')) return 'chatgpt';
@@ -19,6 +43,22 @@
     if (url.includes('grok.com')) return 'grok';
     if (url.includes('meta.ai')) return 'meta_ai';
     return 'unknown';
+  }
+
+  // --- Safe Helper for Text Matching (Replaces invalid pseudo-contains) ---
+
+  function findByText(selector, substringText) {
+    try {
+      const elements = document.querySelectorAll(selector);
+      for (const el of elements) {
+        if (el && el.textContent && el.textContent.includes(substringText)) {
+          return el;
+        }
+      }
+    } catch (e) {
+      // Ignore selector syntax errors
+    }
+    return null;
   }
 
   // --- Platform Extractors ---
@@ -49,15 +89,18 @@
     }
 
     // Plan
-    const planBadge = document.querySelector('span:contains("Plus"), span:contains("Team"), span:contains("Pro"), div[class*="plan-badge"]');
-    if (planBadge && planBadge.innerText) {
-      planName = planBadge.innerText.trim();
+    const planEl = findByText('span, div', 'Plus') || findByText('span, div', 'Pro') || findByText('span, div', 'Team');
+    if (planEl && planEl.innerText) {
+      const text = planEl.innerText.trim();
+      if (text.includes('Plus')) planName = 'Plus';
+      else if (text.includes('Pro')) planName = 'Pro';
+      else if (text.includes('Team')) planName = 'Team';
     } else {
       const pageText = document.body.innerText || '';
       if (pageText.includes('ChatGPT Plus')) planName = 'Plus';
       else if (pageText.includes('ChatGPT Team')) planName = 'Team';
       else if (pageText.includes('ChatGPT Pro')) planName = 'Pro';
-      else planName = 'Free';
+      // If not explicitly found in DOM, planName stays '--'
     }
 
     // Projects / GPTs
@@ -103,15 +146,15 @@
       accountName,
       accountEmail,
       profilePictureUrl,
-      planName,
+      planName: planName || '--',
       hasProjectsConcept: true,
       projects,
       recentChats,
       usage: {
-        limitStatus: limitNotice ? 'warning' : 'available',
+        limitStatus: limitNotice ? 'warning' : (recentChats.length > 0 ? 'available' : 'unknown'),
         limitLabel: limitLabel || '--',
         resetTime: resetTime || '--',
-        details: 'Dados coletados da interface web do ChatGPT'
+        details: 'Coletado da interface web do ChatGPT'
       }
     };
   }
@@ -133,14 +176,15 @@
     }
 
     // Plan
-    const planEl = document.querySelector('span:contains("Pro"), span:contains("Team"), div[class*="plan"]');
+    const planEl = findByText('span, div', 'Pro') || findByText('span, div', 'Team');
     if (planEl && planEl.innerText) {
-      planName = planEl.innerText.trim();
+      const text = planEl.innerText.trim();
+      if (text.includes('Pro')) planName = 'Pro';
+      else if (text.includes('Team')) planName = 'Team';
     } else {
       const text = document.body.innerText || '';
       if (text.includes('Claude Pro')) planName = 'Pro';
       else if (text.includes('Claude Team')) planName = 'Team';
-      else planName = 'Free';
     }
 
     // Projects
@@ -182,15 +226,15 @@
       accountName,
       accountEmail,
       profilePictureUrl,
-      planName,
+      planName: planName || '--',
       hasProjectsConcept: true,
       projects,
       recentChats,
       usage: {
-        limitStatus: limitBanner ? 'warning' : 'available',
+        limitStatus: limitBanner ? 'warning' : (recentChats.length > 0 ? 'available' : 'unknown'),
         limitLabel: limitLabel || '--',
         resetTime: resetTime || '--',
-        details: 'Dados coletados da interface web do Claude'
+        details: 'Coletado da interface web do Claude'
       }
     };
   }
@@ -202,18 +246,14 @@
     let planName = undefined;
     const recentChats = [];
 
-    // Avatar
     const avatarImg = document.querySelector('a[aria-label*="Google"] img, img[src*="googleusercontent.com"]');
     if (avatarImg && avatarImg.src) {
       profilePictureUrl = avatarImg.src;
     }
 
-    // Plan
     const pageText = document.body.innerText || '';
     if (pageText.includes('Gemini Advanced')) planName = 'Advanced';
-    else planName = 'Free';
 
-    // Recent Chats
     const chatLinks = document.querySelectorAll('a[href*="/app/"], div[data-test-id*="recent-conversation"]');
     const seenChats = new Set();
     chatLinks.forEach((link, idx) => {
@@ -233,15 +273,15 @@
       accountName,
       accountEmail,
       profilePictureUrl,
-      planName,
+      planName: planName || '--',
       hasProjectsConcept: false,
       projects: [],
       recentChats,
       usage: {
-        limitStatus: 'available',
+        limitStatus: recentChats.length > 0 ? 'available' : 'unknown',
         limitLabel: '--',
         resetTime: '--',
-        details: 'Dados coletados da interface web do Gemini'
+        details: 'Coletado da interface web do Gemini'
       }
     };
   }
@@ -258,7 +298,6 @@
 
     const pageText = document.body.innerText || '';
     if (pageText.includes('SuperGrok') || pageText.includes('Grok Heavy')) planName = 'SuperGrok';
-    else planName = 'Grok Free';
 
     const chatLinks = document.querySelectorAll('a[href*="/chat/"]');
     const seenChats = new Set();
@@ -273,15 +312,15 @@
 
     return {
       profilePictureUrl,
-      planName,
+      planName: planName || '--',
       hasProjectsConcept: false,
       projects: [],
       recentChats,
       usage: {
-        limitStatus: 'available',
+        limitStatus: recentChats.length > 0 ? 'available' : 'unknown',
         limitLabel: '--',
         resetTime: '--',
-        details: 'Dados coletados da interface web do Grok'
+        details: 'Coletado da interface web do Grok'
       }
     };
   }
@@ -313,17 +352,25 @@
       projects: [],
       recentChats,
       usage: {
-        limitStatus: 'available',
+        limitStatus: recentChats.length > 0 ? 'available' : 'unknown',
         limitLabel: '--',
         resetTime: '--',
-        details: 'Dados coletados da interface web do Meta AI'
+        details: 'Coletado da interface web do Meta AI'
       }
     };
   }
 
   // --- Main Extractor & Bridge Dispatcher ---
 
-  function collectAndReport() {
+  async function collectAndReport() {
+    if (!bridgeConfig.accountId) {
+      await loadBridgeConfig();
+    }
+    if (!bridgeConfig.accountId) {
+      console.warn('[HubAI Collector] accountId não configurado na bridge. Coleta não enviada.');
+      return;
+    }
+
     const url = window.location.href;
     const providerId = getProviderIdFromUrl(url);
 
@@ -339,35 +386,65 @@
     if (!collectedData) return;
 
     const payload = {
+      accountId: bridgeConfig.accountId,
       providerId: providerId,
       url: url,
       extractedAt: new Date().toISOString(),
       platformData: collectedData
     };
 
-    console.log('[HubAI Collector] Dados reais extraídos do DOM:', payload);
+    const serverUrl = (bridgeConfig.serverUrl || 'http://127.0.0.1:8080').replace(/\/$/, '');
+    const endpoint = `${serverUrl}/api/bridge/sync-report`;
 
-    // Send HTTP POST payload to local HubAI bridge endpoint
-    fetch('http://localhost:3000/api/bridge/sync-report', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        console.log('[HubAI Collector] Resposta do HubAI Server:', data);
-      })
-      .catch((err) => {
-        console.warn('[HubAI Collector] Não foi possível enviar para o servidor local (porta 3000):', err.message);
+    console.log('[HubAI Collector] Enviando relatório DOM real:', payload, 'para:', endpoint);
+
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
       });
+      const data = await res.json();
+      console.log('[HubAI Collector] Resposta do Servidor HubAI:', data);
+    } catch (err) {
+      console.warn('[HubAI Collector] Erro ao enviar relatório ao servidor HubAI:', err.message);
+    }
   }
 
-  // Collect once page is loaded
-  setTimeout(collectAndReport, 2000);
-  // Re-collect after interactions or route changes
-  setInterval(collectAndReport, 15000);
+  async function checkPendingSync() {
+    if (!bridgeConfig.accountId) {
+      await loadBridgeConfig();
+    }
+    if (!bridgeConfig.accountId) return;
 
-  // Listener for extension popup / background triggers
+    const url = window.location.href;
+    const providerId = getProviderIdFromUrl(url);
+    if (providerId === 'unknown') return;
+
+    const serverUrl = (bridgeConfig.serverUrl || 'http://127.0.0.1:8080').replace(/\/$/, '');
+    const endpoint = `${serverUrl}/api/bridge/pending-sync?accountId=${encodeURIComponent(bridgeConfig.accountId)}&providerId=${encodeURIComponent(providerId)}`;
+
+    try {
+      const res = await fetch(endpoint);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.pending) {
+          console.log('[HubAI Collector] Solicitação de sincronização pendente detectada! Coletando agora...');
+          await collectAndReport();
+        }
+      }
+    } catch (e) {
+      // Silence network errors on polling
+    }
+  }
+
+  // Initialize
+  loadBridgeConfig().then(() => {
+    setTimeout(collectAndReport, 2000);
+    setInterval(checkPendingSync, 3000);
+    setInterval(collectAndReport, 20000);
+  });
+
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg.action === 'HUBAI_FORCE_COLLECT') {
