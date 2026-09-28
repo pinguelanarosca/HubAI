@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
-import { UpdateStatus, UpdateApplyResult } from '../src/types.js';
+import { UpdateStatus, UpdateApplyResult, ChangedFileDetail, CommitSummary } from '../src/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -156,6 +156,19 @@ export class UpdateService {
 
     const hasUpdate = isDifferent;
 
+    let changedFiles: ChangedFileDetail[] | undefined;
+    let diffSummary: UpdateStatus['diffSummary'] | undefined;
+
+    if (hasUpdate) {
+      try {
+        const details = await this.getCompareDetails(installedCommit, latestCommit);
+        changedFiles = details.changedFiles;
+        diffSummary = details.diffSummary;
+      } catch (compareErr) {
+        console.warn('[UpdateService] Erro ao carregar detalhes de comparação:', compareErr);
+      }
+    }
+
     let currentVersion = '1.0.0';
     try {
       const pkgPath = path.join(REPO_ROOT, 'package.json');
@@ -176,10 +189,148 @@ export class UpdateService {
       currentVersion,
       repoUrl: REPO_URL,
       commitMessage,
+      changedFiles,
+      diffSummary,
       error
     };
 
     return this.cachedStatus;
+  }
+
+  public async getCompareDetails(installedCommit: string, latestCommit: string): Promise<{
+    changedFiles?: ChangedFileDetail[];
+    diffSummary?: {
+      filesCount: number;
+      additions: number;
+      deletions: number;
+      commitsCount: number;
+      commits?: CommitSummary[];
+      description?: string;
+    };
+  }> {
+    if (!installedCommit || !latestCommit || installedCommit === latestCommit || latestCommit === 'unknown') {
+      return {};
+    }
+
+    // 1. Attempt GitHub compare API
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 7000);
+
+      const res = await fetch(`https://api.github.com/repos/pinguelanarosca/HubAI/compare/${installedCommit}...${latestCommit}`, {
+        headers: {
+          'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'HubAI-Updater'
+        },
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = await res.json() as any;
+        const changedFiles: ChangedFileDetail[] = (data.files || []).map((f: any) => ({
+          filename: f.filename,
+          status: f.status,
+          additions: f.additions || 0,
+          deletions: f.deletions || 0
+        }));
+
+        let totalAdditions = 0;
+        let totalDeletions = 0;
+        changedFiles.forEach(f => {
+          totalAdditions += f.additions;
+          totalDeletions += f.deletions;
+        });
+
+        const commits: CommitSummary[] = (data.commits || []).map((c: any) => ({
+          sha: (c.sha || '').slice(0, 7),
+          message: c.commit?.message?.split('\n')?.[0] || '',
+          author: c.commit?.author?.name || c.author?.login,
+          date: c.commit?.author?.date || c.commit?.committer?.date
+        }));
+
+        const filesCount = changedFiles.length;
+        const commitsCount = commits.length || data.total_commits || 0;
+        const description = `${filesCount} arquivo(s) modificado(s) (${totalAdditions} inserções(+), ${totalDeletions} remoções(-)) em ${commitsCount} commit(s) no GitHub.`;
+
+        return {
+          changedFiles,
+          diffSummary: {
+            filesCount,
+            additions: totalAdditions,
+            deletions: totalDeletions,
+            commitsCount,
+            commits,
+            description
+          }
+        };
+      }
+    } catch (err: any) {
+      console.warn('[UpdateService] Não foi possível buscar diff via GitHub Compare API:', err.message);
+    }
+
+    // 2. Fallback to local git diff if available
+    try {
+      const gitDiffNames = execSync(`git diff --name-status ${installedCommit}..${latestCommit} 2>/dev/null`, {
+        cwd: REPO_ROOT,
+        encoding: 'utf-8'
+      }).trim();
+
+      if (gitDiffNames) {
+        const lines = gitDiffNames.split('\n').filter(Boolean);
+        const changedFiles: ChangedFileDetail[] = lines.map(line => {
+          const parts = line.split(/\s+/);
+          const statusChar = parts[0] ? parts[0][0] : 'M';
+          let status = 'modified';
+          if (statusChar === 'A') status = 'added';
+          else if (statusChar === 'D') status = 'removed';
+          else if (statusChar === 'R') status = 'renamed';
+
+          return {
+            filename: parts[1] || parts[0],
+            status,
+            additions: 0,
+            deletions: 0
+          };
+        });
+
+        let commits: CommitSummary[] = [];
+        try {
+          const gitLog = execSync(`git log --oneline --format="%h|%s|%an|%cd" --date=iso ${installedCommit}..${latestCommit} 2>/dev/null`, {
+            cwd: REPO_ROOT,
+            encoding: 'utf-8'
+          }).trim();
+          if (gitLog) {
+            commits = gitLog.split('\n').filter(Boolean).map(line => {
+              const [sha, message, author, date] = line.split('|');
+              return { sha, message, author, date };
+            });
+          }
+        } catch {
+          // Ignore
+        }
+
+        const filesCount = changedFiles.length;
+        const commitsCount = commits.length;
+        const description = `${filesCount} arquivo(s) modificado(s) localmente vs GitHub.`;
+
+        return {
+          changedFiles,
+          diffSummary: {
+            filesCount,
+            additions: 0,
+            deletions: 0,
+            commitsCount,
+            commits,
+            description
+          }
+        };
+      }
+    } catch {
+      // Local git diff failed
+    }
+
+    return {};
   }
 
   /**

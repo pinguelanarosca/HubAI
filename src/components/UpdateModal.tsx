@@ -8,7 +8,13 @@ import {
   Terminal,
   Shield,
   ExternalLink,
-  X
+  X,
+  GitCommit,
+  FileText,
+  FileCode,
+  ChevronDown,
+  ChevronUp,
+  Clock
 } from '../utils/icons.js';
 import { UpdateStatus, UpdateApplyResult } from '../types.js';
 import { fetchUpdateStatus, applyHubUpdate } from '../services/api.js';
@@ -25,6 +31,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
   const [updateResult, setUpdateResult] = useState<UpdateApplyResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState(false);
+  const [showFilesList, setShowFilesList] = useState(true);
   const [pollCount, setPollCount] = useState(0);
   const pollingRef = useRef<number | null>(null);
 
@@ -73,6 +80,10 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
           const freshStatus = await fetchUpdateStatus(true).catch(() => null);
           if (freshStatus) setStatus(freshStatus);
           setPhase('updated');
+          // Auto reload page to reflect new application build
+          window.setTimeout(() => {
+            window.location.reload();
+          }, 1500);
         } else {
           pollServerRestart(attempt + 1);
         }
@@ -308,7 +319,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
 
                 {status.commitMessage && (
                   <div className="py-2 flex items-start justify-between gap-2">
-                    <span className="text-neutral-400 shrink-0">Mensagem:</span>
+                    <span className="text-neutral-400 shrink-0">Mensagem do Commit:</span>
                     <span className="font-mono text-neutral-300 text-right truncate max-w-[320px]">
                       {status.commitMessage}
                     </span>
@@ -328,6 +339,111 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
                   </a>
                 </div>
               </div>
+
+              {/* GitHub vs Machine Difference Summary */}
+              {status.hasUpdate && status.diffSummary && (
+                <div className="p-4 bg-indigo-950/20 border border-indigo-900/50 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-indigo-300 flex items-center gap-1.5">
+                      <GitCommit className="w-4 h-4 text-indigo-400" />
+                      <span>Resumo de Diferenças (GitHub vs Sua Máquina)</span>
+                    </span>
+                    <span className="text-[11px] font-mono bg-indigo-950 text-indigo-300 px-2 py-0.5 rounded border border-indigo-800/80">
+                      {status.diffSummary.commitsCount} commit(s) à frente
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-neutral-300 leading-relaxed">
+                    {status.diffSummary.description}
+                  </p>
+
+                  {/* Commit Log List */}
+                  {status.diffSummary.commits && status.diffSummary.commits.length > 0 && (
+                    <div className="space-y-1.5 pt-2 border-t border-indigo-900/40">
+                      <span className="text-[11px] font-medium text-neutral-400 block">Commits novos a serem aplicados:</span>
+                      <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
+                        {status.diffSummary.commits.map((c, idx) => (
+                          <div key={idx} className="p-1.5 bg-neutral-950/80 rounded border border-neutral-800 flex items-center justify-between text-[11px] gap-2 font-mono">
+                            <div className="flex items-center gap-2 truncate">
+                              <span className="text-indigo-400 font-bold shrink-0">{c.sha}</span>
+                              <span className="text-neutral-300 truncate">{c.message}</span>
+                            </div>
+                            {c.date && (
+                              <span className="text-[10px] text-neutral-500 shrink-0">
+                                {new Date(c.date).toLocaleDateString('pt-BR')}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Changed Files Description */}
+              {status.changedFiles && status.changedFiles.length > 0 && (
+                <div className="p-4 bg-neutral-950 border border-neutral-800 rounded-xl space-y-3">
+                  <button
+                    onClick={() => setShowFilesList(!showFilesList)}
+                    className="w-full flex items-center justify-between text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <FileCode className="w-4 h-4 text-emerald-400" />
+                      <span className="text-xs font-semibold text-neutral-200">
+                        Descrição dos Arquivos Alterados ({status.changedFiles.length})
+                      </span>
+                    </div>
+                    {showFilesList ? (
+                      <ChevronUp className="w-4 h-4 text-neutral-400" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4 text-neutral-400" />
+                    )}
+                  </button>
+
+                  {showFilesList && (
+                    <div className="space-y-1.5 pt-1 max-h-48 overflow-y-auto pr-1 text-xs">
+                      {status.changedFiles.map((file, idx) => {
+                        let statusColor = 'text-amber-400 bg-amber-950/50 border-amber-900/60';
+                        let statusLabel = 'Modificado';
+                        if (file.status === 'added') {
+                          statusColor = 'text-emerald-400 bg-emerald-950/50 border-emerald-900/60';
+                          statusLabel = 'Adicionado';
+                        } else if (file.status === 'removed') {
+                          statusColor = 'text-rose-400 bg-rose-950/50 border-rose-900/60';
+                          statusLabel = 'Removido';
+                        } else if (file.status === 'renamed') {
+                          statusColor = 'text-purple-400 bg-purple-950/50 border-purple-900/60';
+                          statusLabel = 'Renomeado';
+                        }
+
+                        return (
+                          <div
+                            key={idx}
+                            className="p-2 bg-neutral-900/80 rounded-lg border border-neutral-800 flex items-center justify-between gap-2 font-mono text-[11px]"
+                          >
+                            <div className="flex items-center gap-2 truncate">
+                              <span className={`px-1.5 py-0.5 text-[10px] rounded border font-sans font-medium ${statusColor}`}>
+                                {statusLabel}
+                              </span>
+                              <span className="text-neutral-200 truncate" title={file.filename}>
+                                {file.filename}
+                              </span>
+                            </div>
+
+                            {(file.additions > 0 || file.deletions > 0) && (
+                              <div className="flex items-center gap-1.5 text-[10px] shrink-0 font-bold">
+                                {file.additions > 0 && <span className="text-emerald-400">+{file.additions}</span>}
+                                {file.deletions > 0 && <span className="text-rose-400">-{file.deletions}</span>}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Update Result Logs Banner */}
               {updateResult && updateResult.logs && updateResult.logs.length > 0 && (

@@ -164,6 +164,20 @@ export interface LaunchResult {
   warning?: string;
 }
 
+export interface ChangedFileDetail {
+  filename: string;
+  status: string;
+  additions: number;
+  deletions: number;
+}
+
+export interface CommitSummary {
+  sha: string;
+  message: string;
+  author?: string;
+  date?: string;
+}
+
 export interface UpdateStatus {
   installedCommit: string;
   installedCommitDate?: string;
@@ -176,6 +190,15 @@ export interface UpdateStatus {
   repoUrl: string;
   commitMessage?: string;
   releaseNotes?: string;
+  changedFiles?: ChangedFileDetail[];
+  diffSummary?: {
+    filesCount: number;
+    additions: number;
+    deletions: number;
+    commitsCount: number;
+    commits?: CommitSummary[];
+    description?: string;
+  };
   error?: string;
 }
 
