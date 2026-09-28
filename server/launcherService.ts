@@ -192,7 +192,12 @@ export class LauncherService {
     const effectiveUserDataDir = account.userDataDir || config.system.chromeUserDataDir;
     const browserCommand = config.system.browserCommand || 'google-chrome';
     const openInNewWindow = config.system.openInNewWindow !== false;
-    const extraFlags = config.system.additionalFlags || ['--no-first-run'];
+    const baseExtraFlags = config.system.additionalFlags || ['--no-first-run'];
+    const extensionDir = path.resolve(process.cwd(), 'chrome-extension');
+    const extraFlags = [...baseExtraFlags];
+    if (fs.existsSync(extensionDir) && !extraFlags.some(f => f.startsWith('--load-extension='))) {
+      extraFlags.push(`--load-extension=${extensionDir}`);
+    }
 
     // 1. STRICT VALIDATION: Check that the configured browser executable actually exists!
     let validatedBinary: string | undefined;

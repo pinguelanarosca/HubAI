@@ -2,7 +2,7 @@ import assert from 'assert';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { ConfigManager } from '../server/configManager.js';
+import { configManager, ConfigManager } from '../server/configManager.js';
 import { LauncherService } from '../server/launcherService.js';
 import { ProfileScanner } from '../server/profileScanner.js';
 import { DiagnosticService } from '../server/diagnosticService.js';
@@ -360,28 +360,64 @@ async function runIntegrationTests() {
     console.log('✓ PASSOU: Diretório de configurações do usuário é 100% preservado.');
 
     // -------------------------------------------------------------------------
-    // TESTE 11: Testando serviço de enriquecimento de sessão de contas (EnrichmentService)
+    // TESTE 11: Testando ponte de enriquecimento DOM em tempo real (EnrichmentService Bridge)
     // -------------------------------------------------------------------------
-    console.log('[TESTE 11] Testando serviço de enriquecimento de sessão de contas (EnrichmentService)...');
+    console.log('[TESTE 11] Testando ponte de enriquecimento DOM em tempo real (EnrichmentService Bridge)...');
     const { enrichmentService } = await import('../server/enrichmentService.js');
-    const testAccount = currentConfigBefore.accounts[0];
-    assert.ok(testAccount, 'Deve haver ao menos uma conta no config de teste');
+    const activeAccount = configManager.getConfig().accounts[0];
+    assert.ok(activeAccount, 'Deve haver ao menos uma conta no config de teste');
 
-    const chatgptStatus = await enrichmentService.getAccountStatus(testAccount, 'chatgpt', true);
-    assert.strictEqual(chatgptStatus.accountId, testAccount.id);
-    assert.strictEqual(chatgptStatus.providerId, 'chatgpt');
-    assert.ok(chatgptStatus.planName === '--' || chatgptStatus.planName === 'FREE', 'planName deve ser retornado do perfil');
-    assert.strictEqual(chatgptStatus.hasProjectsConcept, true);
-    assert.ok(Array.isArray(chatgptStatus.projects), 'Deve conter lista de projetos');
-    assert.ok(Array.isArray(chatgptStatus.recentChats), 'Deve conter lista de chats recentes');
-    assert.ok(chatgptStatus.usage, 'Deve conter informações de cota/uso');
-    assert.ok(chatgptStatus.usage.limitLabel === '--' || chatgptStatus.usage.limitLabel === 'Disponível', 'limitLabel deve refletir dados da sessão');
+    // 1. Sem relatório DOM enviado: deve retornar '--' e status 'unavailable' sem dados fictícios
+    const initialStatus = await enrichmentService.getAccountStatus(activeAccount, 'chatgpt', false);
+    assert.strictEqual(initialStatus.accountId, activeAccount.id);
+    assert.strictEqual(initialStatus.providerId, 'chatgpt');
+    assert.strictEqual(initialStatus.planName, '--');
+    assert.strictEqual(initialStatus.hasProjectsConcept, true);
+    assert.strictEqual(initialStatus.usage.limitLabel, '--');
+    assert.strictEqual(initialStatus.syncState, 'unavailable');
 
-    const geminiStatus = await enrichmentService.getAccountStatus(testAccount, 'gemini', true);
+    // 2. Enviar relatório DOM real simulando coleta da ponte do Chrome
+    const mockBridgeReport = {
+      providerId: 'chatgpt',
+      accountId: activeAccount.id,
+      chromeProfileDir: activeAccount.chromeProfileDir,
+      extractedAt: new Date().toISOString(),
+      platformData: {
+        accountName: 'Alexandre Real',
+        accountEmail: 'alexandre.real@gmail.com',
+        profilePictureUrl: 'https://lh3.googleusercontent.com/a/mock-avatar.png',
+        planName: 'Plus',
+        projects: [{ id: 'p1', name: 'Automação Python' }],
+        recentChats: [{ id: 'c1', title: 'Refatoração de Código', timeOrDate: '14:20' }],
+        usage: {
+          limitStatus: 'available' as const,
+          limitLabel: '40 msgs / 3 horas',
+          resetTime: '17:00',
+          details: 'Coletado da interface web do ChatGPT'
+        }
+      }
+    };
+
+    const processResult = enrichmentService.processBridgeReport(mockBridgeReport);
+    assert.strictEqual(processResult.success, true);
+
+    // 3. Verificar que o status da conta foi atualizado com os dados reais do DOM
+    const updatedStatus = await enrichmentService.getAccountStatus(activeAccount, 'chatgpt', false);
+    assert.strictEqual(updatedStatus.accountName, 'Alexandre Real');
+    assert.strictEqual(updatedStatus.accountEmail, 'alexandre.real@gmail.com');
+    assert.strictEqual(updatedStatus.profilePictureUrl, 'https://lh3.googleusercontent.com/a/mock-avatar.png');
+    assert.strictEqual(updatedStatus.planName, 'Plus');
+    assert.strictEqual(updatedStatus.projects.length, 1);
+    assert.strictEqual(updatedStatus.projects[0].name, 'Automação Python');
+    assert.strictEqual(updatedStatus.recentChats[0].title, 'Refatoração de Código');
+    assert.strictEqual(updatedStatus.usage.limitLabel, '40 msgs / 3 horas');
+    assert.strictEqual(updatedStatus.syncState, 'synced');
+
+    const geminiStatus = await enrichmentService.getAccountStatus(activeAccount, 'gemini', false);
     assert.strictEqual(geminiStatus.hasProjectsConcept, false, 'Gemini não possui conceito de projetos');
     assert.strictEqual(geminiStatus.projects.length, 0);
 
-    console.log('✓ PASSOU: Estrutura de dados e adaptadores de enriquecimento validados com sucesso.');
+    console.log('✓ PASSOU: Ponte de coleta DOM e atualização de estado validadas com sucesso.');
 
     console.log('\n================================================================');
     console.log('  TODOS OS 11 TESTES DE INTEGRAÇÃO & ATUALIZAÇÃO FORAM APROVADOS! ');

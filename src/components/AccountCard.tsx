@@ -63,12 +63,24 @@ export const AccountCard: React.FC<AccountCardProps> = ({
 
   // Sync state indicator
   let syncDot = '🟢';
-  if (status?.syncState === 'cached') syncDot = '🟡';
-  if (status?.syncState === 'unavailable' || status?.syncState === 'error') syncDot = '⚪';
-  if (isSyncing) syncDot = '🔄';
+  let syncStateLabel = 'Sincronizado';
+  if (status?.syncState === 'cached') {
+    syncDot = '🟡';
+    syncStateLabel = 'Em cache';
+  } else if (status?.syncState === 'unavailable') {
+    syncDot = '⚪';
+    syncStateLabel = 'Indisponível';
+  } else if (status?.syncState === 'error') {
+    syncDot = '🔴';
+    syncStateLabel = 'Erro de Coleta';
+  }
+  if (isSyncing) {
+    syncDot = '🔄';
+    syncStateLabel = 'Sincronizando...';
+  }
 
-  const planLabel = status?.planName && status.planName !== '--' ? status.planName : 'FREE';
-  const hasPhoto = Boolean(status?.profilePictureUrl);
+  const planLabel = status?.planName && status.planName !== '' ? status.planName : '--';
+  const hasPhoto = Boolean(status?.profilePictureUrl && status.profilePictureUrl !== '--');
 
   const projectsList = status?.projects || [];
   const chatsList = status?.recentChats || [];
@@ -100,7 +112,7 @@ export const AccountCard: React.FC<AccountCardProps> = ({
                   <Icon className="w-4 h-4" />
                 </div>
               )}
-              <span className="absolute -top-1 -left-1 text-[9px] leading-none" title={`Sessão: ${status?.syncState || 'Padrão'}`}>
+              <span className="absolute -top-1 -left-1 text-[9px] leading-none" title={`Estado de Sincronização: ${syncStateLabel} (${status?.lastSyncAt || 'Não sincronizado'})`}>
                 {syncDot}
               </span>
             </div>

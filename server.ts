@@ -21,6 +21,17 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Allow CORS for local extension bridge requests
+  app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+    next();
+  });
+
   // 1. Config Endpoints
   app.get('/api/config', (req, res) => {
     try {
@@ -151,6 +162,16 @@ async function startServer() {
   });
 
   // 2b. Account Enrichment & Session Status Endpoints
+  app.post('/api/bridge/sync-report', (req, res) => {
+    try {
+      const report = req.body;
+      const result = enrichmentService.processBridgeReport(report);
+      res.json({ success: true, result });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   app.get('/api/accounts/enrichment', async (req, res) => {
     try {
       const providerId = (req.query.providerId as string) || 'chatgpt';
