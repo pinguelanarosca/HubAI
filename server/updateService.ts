@@ -43,22 +43,32 @@ export class UpdateService {
     }
   }
 
-  public async getRemoteCommit(): Promise<{ commit: string; message?: string }> {
-    // 1. Try git ls-remote first
+  public getInstalledCommitDate(): string | undefined {
     try {
-      const remoteOut = execSync(`git ls-remote ${REPO_URL}.git HEAD 2>/dev/null`, {
-        encoding: 'utf-8',
-        timeout: 5000
+      const gitDate = execSync('git log -1 --format=%cd --date=iso 2>/dev/null', {
+        cwd: REPO_ROOT,
+        encoding: 'utf-8'
       }).trim();
-      const parts = remoteOut.split(/\s+/);
-      if (parts[0] && parts[0].length >= 7) {
-        return { commit: parts[0] };
-      }
+      if (gitDate) return gitDate;
     } catch {
-      // Network or git failed, try GitHub API
+      // Not a git working tree
     }
 
-    // 2. Fallback to GitHub REST API with fetch
+    const versionFile = path.join(REPO_ROOT, '.version.json');
+    if (fs.existsSync(versionFile)) {
+      try {
+        const vData = JSON.parse(fs.readFileSync(versionFile, 'utf-8'));
+        if (vData.date) return vData.date;
+      } catch {
+        // Ignore
+      }
+    }
+
+    return undefined;
+  }
+
+  public async getRemoteCommit(): Promise<{ commit: string; message?: string; date?: string }> {
+    // 1. Try GitHub REST API first (provides SHA, commit message, committer date and time)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 6000);
@@ -76,14 +86,41 @@ export class UpdateService {
         const data = await res.json() as any;
         return {
           commit: data.sha || 'unknown',
-          message: data.commit?.message?.split('\n')?.[0]
+          message: data.commit?.message?.split('\n')?.[0],
+          date: data.commit?.committer?.date || data.commit?.author?.date
         };
       }
     } catch (err: any) {
       console.warn('[UpdateService] Não foi possível verificar commit remoto via GitHub API:', err.message);
     }
 
-    return { commit: this.getInstalledCommit() };
+    // 2. Fallback to git ls-remote or git log
+    try {
+      const remoteOut = execSync(`git ls-remote ${REPO_URL}.git HEAD 2>/dev/null`, {
+        encoding: 'utf-8',
+        timeout: 5000
+      }).trim();
+      const parts = remoteOut.split(/\s+/);
+      if (parts[0] && parts[0].length >= 7) {
+        let commitDate: string | undefined;
+        try {
+          commitDate = execSync('git log -1 --format=%cd --date=iso origin/main 2>/dev/null', {
+            cwd: REPO_ROOT,
+            encoding: 'utf-8'
+          }).trim() || undefined;
+        } catch {
+          // Ignore
+        }
+        return { commit: parts[0], date: commitDate };
+      }
+    } catch {
+      // Network or git failed
+    }
+
+    return {
+      commit: this.getInstalledCommit(),
+      date: this.getInstalledCommitDate()
+    };
   }
 
   public async checkUpdate(force: boolean = false): Promise<UpdateStatus> {
@@ -98,13 +135,16 @@ export class UpdateService {
     }
 
     const installedCommit = this.getInstalledCommit();
+    const installedCommitDate = this.getInstalledCommitDate();
     let latestCommit = installedCommit;
+    let latestCommitDate = installedCommitDate;
     let commitMessage: string | undefined;
     let error: string | undefined;
 
     try {
       const remote = await this.getRemoteCommit();
       latestCommit = remote.commit;
+      latestCommitDate = remote.date || latestCommitDate;
       commitMessage = remote.message;
     } catch (err: any) {
       error = err.message || 'Falha ao conectar com o repositório remoto.';
@@ -128,7 +168,9 @@ export class UpdateService {
     this.lastChecked = now;
     this.cachedStatus = {
       installedCommit,
+      installedCommitDate,
       latestCommit,
+      latestCommitDate,
       hasUpdate,
       lastChecked: now,
       currentVersion,

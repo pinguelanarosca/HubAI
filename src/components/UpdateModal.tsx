@@ -264,18 +264,46 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
                   <span className="font-mono text-neutral-200">{status.currentVersion}</span>
                 </div>
 
-                <div className="py-2 flex items-center justify-between">
-                  <span className="text-neutral-400">Commit Instalado:</span>
-                  <span className="font-mono text-neutral-300 truncate max-w-[280px]" title={status.installedCommit}>
-                    {status.installedCommit.slice(0, 10)}
-                  </span>
+                <div className="py-2 flex items-center justify-between gap-2">
+                  <span className="text-neutral-400 shrink-0">Commit Instalado:</span>
+                  <div className="text-right">
+                    <span className="font-mono text-neutral-300 block" title={status.installedCommit}>
+                      {status.installedCommit.slice(0, 10)}
+                    </span>
+                    {status.installedCommitDate && (
+                      <span className="text-[10px] text-neutral-500 font-mono block mt-0.5">
+                        {new Date(status.installedCommitDate).toLocaleString('pt-BR', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit'
+                        })}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                <div className="py-2 flex items-center justify-between">
-                  <span className="text-neutral-400">Último Commit no GitHub:</span>
-                  <span className="font-mono text-indigo-300 truncate max-w-[280px]" title={status.latestCommit}>
-                    {status.latestCommit.slice(0, 10)}
-                  </span>
+                <div className="py-2 flex items-center justify-between gap-2">
+                  <span className="text-neutral-400 shrink-0">Último Commit no GitHub:</span>
+                  <div className="text-right">
+                    <span className="font-mono text-indigo-300 block" title={status.latestCommit}>
+                      {status.latestCommit.slice(0, 10)}
+                    </span>
+                    {status.latestCommitDate && (
+                      <span className="text-[10px] text-indigo-400/80 font-mono block mt-0.5">
+                        {new Date(status.latestCommitDate).toLocaleString('pt-BR', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit'
+                        })}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {status.commitMessage && (

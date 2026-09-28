@@ -166,7 +166,9 @@ export interface LaunchResult {
 
 export interface UpdateStatus {
   installedCommit: string;
+  installedCommitDate?: string;
   latestCommit: string;
+  latestCommitDate?: string;
   hasUpdate: boolean;
   lastChecked: string;
   currentVersion: string;
