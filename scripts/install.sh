@@ -1,51 +1,47 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# HubAI - Instalador Oficial para Linux
+# HubAI - Instalador Oficial e Configurador de Ambiente Linux
 # Repositório Oficial: https://github.com/pinguelanarosca/HubAI
 # ==============================================================================
 set -e
 
-REPO_URL="https://github.com/pinguelanarosca/HubAI.git"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/share/hubai}" # ~/.local/share/hubai
-CONFIG_DIR="${CONFIG_DIR:-$HOME/.config/hubai}"        # ~/.config/hubai
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Caminhos Padrão do Usuário Linux (XDG Base Directory)
+# Instalação: ~/.local/share/hubai
+# Configuração: ~/.config/hubai
+# Repositório: https://github.com/pinguelanarosca/HubAI
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/share/hubai}"
+CONFIG_DIR="${CONFIG_DIR:-$HOME/.config/hubai}"
 BIN_DIR="$HOME/.local/bin"
 DESKTOP_DIR="$HOME/.local/share/applications"
 UPDATER_PATH="$HOME/.local/share/hubai-updater.sh"
 
 echo "=================================================="
-echo "         INSTALADOR OFICIAL HUBAI - LINUX         "
+echo "          INSTALADOR OFICIAL DO HUBAI             "
+echo "=================================================="
+echo "Origem:       $SCRIPT_DIR"
+echo "Instalação:   ~/.local/share/hubai ($INSTALL_DIR)"
+echo "Configuração: ~/.config/hubai ($CONFIG_DIR)"
 echo "=================================================="
 echo ""
 
-# 1. Checagem de Pré-requisitos
-echo "[1/6] Verificando pré-requisitos do sistema..."
-
-if ! command -v bash &>/dev/null; then
-  echo "ERRO: bash é obrigatório."
-  exit 1
-fi
-
+# 1. Verificar dependências essenciais do Linux
+echo "[1/6] Verificando dependências do sistema..."
 if ! command -v node &>/dev/null; then
-  echo "ERRO: Node.js não foi encontrado no PATH."
-  echo "Instale o Node.js v18 ou superior no seu sistema Linux antes de continuar."
-  exit 1
-fi
-
-NODE_MAJOR=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
-if [ "$NODE_MAJOR" -lt 18 ]; then
-  echo "ERRO: Node.js versão 18 ou superior é necessário. Versão detectada: $(node -v)"
+  echo "ERRO: Node.js não foi encontrado. Por favor, instale o Node.js (v18+) antes de continuar."
   exit 1
 fi
 
 if ! command -v npm &>/dev/null; then
-  echo "ERRO: npm não foi encontrado no PATH."
+  echo "ERRO: npm não foi encontrado. Por favor, instale o npm antes de continuar."
   exit 1
 fi
 
-echo "✓ Node.js $(node -v) e npm $(npm -v) verificados com sucesso."
+NODE_VERSION=$(node -v)
+echo "✓ Node.js detectado: $NODE_VERSION"
 
-# 2. Preparar Diretórios do Usuário (Sem necessidade de sudo)
-echo "[2/6] Preparando diretórios do usuário..."
+# 2. Criar diretórios de usuário no Linux (XDG Base Directory)
+echo "[2/6] Criando diretórios padrão do usuário..."
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$CONFIG_DIR"
 mkdir -p "$CONFIG_DIR/logs"
@@ -53,49 +49,38 @@ mkdir -p "$CONFIG_DIR/backups"
 mkdir -p "$BIN_DIR"
 mkdir -p "$DESKTOP_DIR"
 
-# 3. Obter Código-Fonte (Local ou do GitHub)
-echo "[3/6] Configurando arquivos da aplicação em $INSTALL_DIR..."
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-if [ -f "$SCRIPT_DIR/package.json" ] && [ -f "$SCRIPT_DIR/server.ts" ]; then
-  echo "Instalando a partir do diretório local: $SCRIPT_DIR"
-  cp -r "$SCRIPT_DIR/src" "$INSTALL_DIR/" 2>/dev/null || true
-  cp -r "$SCRIPT_DIR/server" "$INSTALL_DIR/" 2>/dev/null || true
-  cp -r "$SCRIPT_DIR/scripts" "$INSTALL_DIR/" 2>/dev/null || true
-  cp -r "$SCRIPT_DIR/public" "$INSTALL_DIR/" 2>/dev/null || true
-  cp "$SCRIPT_DIR/package.json" "$INSTALL_DIR/" 2>/dev/null || true
-  cp "$SCRIPT_DIR/package-lock.json" "$INSTALL_DIR/" 2>/dev/null || true
-  cp "$SCRIPT_DIR/tsconfig.json" "$INSTALL_DIR/" 2>/dev/null || true
-  cp "$SCRIPT_DIR/vite.config.ts" "$INSTALL_DIR/" 2>/dev/null || true
-  cp "$SCRIPT_DIR/server.ts" "$INSTALL_DIR/" 2>/dev/null || true
-  cp "$SCRIPT_DIR/index.html" "$INSTALL_DIR/" 2>/dev/null || true
-  if [ -f "$SCRIPT_DIR/.version" ]; then
-    cp "$SCRIPT_DIR/.version" "$INSTALL_DIR/" 2>/dev/null || true
-  fi
-elif command -v git &>/dev/null; then
-  echo "Clonando do repositório remoto $REPO_URL..."
-  TEMP_CLONE=$(mktemp -d /tmp/hubai-install-XXXXXX)
-  git clone "$REPO_URL" "$TEMP_CLONE"
-  cp -r "$TEMP_CLONE/"* "$INSTALL_DIR/" 2>/dev/null || true
-  cp -r "$TEMP_CLONE/".[!.]* "$INSTALL_DIR/" 2>/dev/null || true
-  rm -rf "$TEMP_CLONE"
+# 3. Copiar arquivos do HubAI para ~/.local/share/hubai
+echo "[3/6] Instalando arquivos do aplicativo em $INSTALL_DIR..."
+# Copiar preservando estrutura, ignorando node_modules locais se houver
+if command -v rsync &>/dev/null; then
+  rsync -a --delete --exclude='node_modules' --exclude='.git' --exclude='data/hub-config.json' "$SCRIPT_DIR/" "$INSTALL_DIR/"
 else
-  echo "ERRO: git não está instalado e nenhum diretório local com o código foi encontrado."
-  exit 1
+  # Fallback com cp
+  cp -r "$SCRIPT_DIR/package.json" "$INSTALL_DIR/"
+  cp -r "$SCRIPT_DIR/tsconfig.json" "$INSTALL_DIR/" 2>/dev/null || true
+  cp -r "$SCRIPT_DIR/vite.config.ts" "$INSTALL_DIR/" 2>/dev/null || true
+  cp -r "$SCRIPT_DIR/server.ts" "$INSTALL_DIR/" 2>/dev/null || true
+  cp -r "$SCRIPT_DIR/server" "$INSTALL_DIR/" 2>/dev/null || true
+  cp -r "$SCRIPT_DIR/src" "$INSTALL_DIR/" 2>/dev/null || true
+  cp -r "$SCRIPT_DIR/scripts" "$INSTALL_DIR/" 2>/dev/null || true
+  cp -r "$SCRIPT_DIR/index.html" "$INSTALL_DIR/" 2>/dev/null || true
+  cp -r "$SCRIPT_DIR/uninstall.sh" "$INSTALL_DIR/" 2>/dev/null || true
 fi
 
-# 4. Instalar Dependências e Compilar
+# 4. Instalar dependências npm e compilar o frontend
 echo "[4/6] Instalando dependências e compilando aplicação..."
 cd "$INSTALL_DIR"
-npm install --legacy-peer-deps || npm install
+npm install --no-audit --no-fund --legacy-peer-deps
 npm run build
 
-# 5. Instalar Atualizador Externo Autônomo (~/.local/share/hubai-updater.sh)
-echo "[5/6] Instalando atualizador externo e launcher..."
-if [ -f "$INSTALL_DIR/scripts/hubai-updater.sh" ]; then
-  cp "$INSTALL_DIR/scripts/hubai-updater.sh" "$UPDATER_PATH"
+# 5. Criar Script Atualizador Autônomo e Lançador
+echo "[5/6] Instalando script de atualização autônoma e executável..."
+
+# Copiar hubai-updater.sh
+if [ -f "$SCRIPT_DIR/scripts/hubai-updater.sh" ]; then
+  cp "$SCRIPT_DIR/scripts/hubai-updater.sh" "$UPDATER_PATH"
 else
-  cp "$SCRIPT_DIR/scripts/hubai-updater.sh" "$UPDATER_PATH" 2>/dev/null || true
+  cp "$INSTALL_DIR/scripts/hubai-updater.sh" "$UPDATER_PATH"
 fi
 chmod +x "$UPDATER_PATH"
 
@@ -112,7 +97,7 @@ LOG_FILE="$LOG_DIR/hubai.log"
 PID_FILE="$HUBAI_CONFIG_DIR/hubai.pid"
 
 ACTION="start"
-PORT="${PORT:-${HUBAI_PORT:-3000}}"
+PORT="${PORT:-${HUBAI_PORT:-8080}}"
 UNINSTALL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -220,14 +205,22 @@ if [ ! -d "dist" ]; then
   npm run build >> "$LOG_FILE" 2>&1
 fi
 
-# Iniciar HubAI desanexado do terminal
+# Iniciar HubAI desanexado do terminal (Background Daemon não bloqueante)
 nohup npm start >> "$LOG_FILE" 2>&1 &
 NEW_PID=$!
 echo "$NEW_PID" > "$PID_FILE"
 
-echo "HubAI iniciado com sucesso (PID: $NEW_PID)."
-echo "Painel disponível em: http://localhost:$PORT"
-echo "Logs gravados em:      $LOG_FILE"
+sleep 1
+
+echo "✓ HubAI iniciado com sucesso em segundo plano (PID: $NEW_PID)."
+echo "  Painel disponível em: http://localhost:$PORT"
+echo "  Logs gravados em:      $LOG_FILE"
+
+if command -v xdg-open &>/dev/null && [ -n "$DISPLAY$WAYLAND_DISPLAY" ]; then
+  xdg-open "http://localhost:$PORT" &>/dev/null &
+fi
+
+exit 0
 EOF
 
 chmod +x "$BIN_DIR/hubai"
@@ -238,8 +231,8 @@ if [ -f "$SCRIPT_DIR/uninstall.sh" ]; then
   chmod +x "$INSTALL_DIR/uninstall.sh"
 fi
 
-# 6. Criar Atalho no Menu Desktop (~/.local/share/applications/hubai.desktop)
-echo "[6/6] Criando lançador no menu desktop ($DESKTOP_DIR/hubai.desktop)..."
+# 6. Criar Atalhos no Menu, Área de Trabalho e Fixar na Dock do Ubuntu
+echo "[6/6] Criando lançadores (.desktop), atalho na Área de Trabalho e fixando na Dock do Ubuntu..."
 cat << EOF > "$DESKTOP_DIR/hubai.desktop"
 [Desktop Entry]
 Version=1.0
@@ -252,9 +245,43 @@ Icon=google-chrome
 Terminal=false
 Categories=Network;WebBrowser;Utility;
 Keywords=AI;Gemini;ChatGPT;Claude;Grok;Chrome;Profiles;
+StartupNotify=true
 EOF
 
 chmod +x "$DESKTOP_DIR/hubai.desktop"
+
+# Criar atalho na Área de Trabalho do Usuário (Desktop)
+USER_DESKTOP_DIR=""
+if command -v xdg-user-dir &>/dev/null; then
+  USER_DESKTOP_DIR="$(xdg-user-dir DESKTOP 2>/dev/null || echo "")"
+fi
+if [ -z "$USER_DESKTOP_DIR" ] || [ ! -d "$USER_DESKTOP_DIR" ]; then
+  USER_DESKTOP_DIR="$HOME/Desktop"
+fi
+
+if [ -d "$USER_DESKTOP_DIR" ]; then
+  cp "$DESKTOP_DIR/hubai.desktop" "$USER_DESKTOP_DIR/hubai.desktop"
+  chmod +x "$USER_DESKTOP_DIR/hubai.desktop"
+  if command -v gio &>/dev/null; then
+    gio set "$USER_DESKTOP_DIR/hubai.desktop" metadata::trusted true 2>/dev/null || true
+  fi
+  echo "✓ Atalho criado na Área de Trabalho: $USER_DESKTOP_DIR/hubai.desktop"
+fi
+
+# Fixar atalho na Dock do Ubuntu / GNOME Shell
+if command -v gsettings &>/dev/null; then
+  CURRENT_FAVORITES=$(gsettings get org.gnome.shell favorite-apps 2>/dev/null || echo "")
+  if [ -n "$CURRENT_FAVORITES" ] && [[ "$CURRENT_FAVORITES" != *"hubai.desktop"* ]]; then
+    NEW_FAVORITES=$(echo "$CURRENT_FAVORITES" | sed "s/]/, 'hubai.desktop']/" | sed "s/\\[, /\\[/")
+    gsettings set org.gnome.shell favorite-apps "$NEW_FAVORITES" 2>/dev/null || true
+    echo "✓ Atalho fixado automaticamente na Dock do Ubuntu/GNOME."
+  fi
+fi
+
+# Atualizar base de atalhos do sistema
+if command -v update-desktop-database &>/dev/null; then
+  update-desktop-database "$DESKTOP_DIR" &>/dev/null || true
+fi
 
 echo ""
 echo "=================================================="
@@ -263,9 +290,13 @@ echo "=================================================="
 echo "Diretório da aplicação: $INSTALL_DIR"
 echo "Configuração do usuário: $CONFIG_DIR (preservada)"
 echo "Comando no terminal:     hubai"
-echo "Atualizador autônomo:    $UPDATER_PATH"
 echo "Atalho no menu:          HubAI (.desktop)"
+echo "Atalho na Área Trabalho: $USER_DESKTOP_DIR/hubai.desktop"
+echo "Dock do Ubuntu:          Fixado na barra lateral"
+echo "Atualizador autônomo:    $UPDATER_PATH"
+echo "Desinstalador completo:  hubai uninstall --purge"
 echo ""
-echo "Para iniciar o aplicativo agora, execute: hubai"
-echo "Ou abra o 'HubAI' pelo menu do seu sistema operacional."
+echo "Para iniciar o aplicativo:"
+echo "  • Clique no ícone do HubAI na Dock do Ubuntu ou na Área de Trabalho"
+echo "  • Ou execute no terminal: hubai (inicia e libera o terminal imediatamente)"
 echo ""

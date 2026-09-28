@@ -112,7 +112,7 @@ LOG_FILE="$LOG_DIR/hubai.log"
 PID_FILE="$HUBAI_CONFIG_DIR/hubai.pid"
 
 ACTION="start"
-PORT="${PORT:-${HUBAI_PORT:-3000}}"
+PORT="${PORT:-${HUBAI_PORT:-8080}}"
 UNINSTALL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -220,14 +220,22 @@ if [ ! -d "dist" ]; then
   npm run build >> "$LOG_FILE" 2>&1
 fi
 
-# Iniciar HubAI desanexado do terminal
+# Iniciar HubAI desanexado do terminal (Background Daemon não bloqueante)
 nohup npm start >> "$LOG_FILE" 2>&1 &
 NEW_PID=$!
 echo "$NEW_PID" > "$PID_FILE"
 
-echo "HubAI iniciado com sucesso (PID: $NEW_PID)."
-echo "Painel disponível em: http://localhost:$PORT"
-echo "Logs gravados em:      $LOG_FILE"
+sleep 1
+
+echo "✓ HubAI iniciado com sucesso em segundo plano (PID: $NEW_PID)."
+echo "  Painel disponível em: http://localhost:$PORT"
+echo "  Logs gravados em:      $LOG_FILE"
+
+if command -v xdg-open &>/dev/null && [ -n "$DISPLAY$WAYLAND_DISPLAY" ]; then
+  xdg-open "http://localhost:$PORT" &>/dev/null &
+fi
+
+exit 0
 EOF
 
 chmod +x "$BIN_DIR/hubai"
@@ -238,8 +246,8 @@ if [ -f "$SCRIPT_DIR/uninstall.sh" ]; then
   chmod +x "$INSTALL_DIR/uninstall.sh"
 fi
 
-# 6. Criar Atalho no Menu Desktop (~/.local/share/applications/hubai.desktop)
-echo "[6/6] Criando lançador no menu desktop ($DESKTOP_DIR/hubai.desktop)..."
+# 6. Criar Atalhos no Menu, Área de Trabalho e Fixar na Dock do Ubuntu
+echo "[6/6] Criando lançadores (.desktop), atalho na Área de Trabalho e fixando na Dock do Ubuntu..."
 cat << EOF > "$DESKTOP_DIR/hubai.desktop"
 [Desktop Entry]
 Version=1.0
@@ -252,9 +260,43 @@ Icon=google-chrome
 Terminal=false
 Categories=Network;WebBrowser;Utility;
 Keywords=AI;Gemini;ChatGPT;Claude;Grok;Chrome;Profiles;
+StartupNotify=true
 EOF
 
 chmod +x "$DESKTOP_DIR/hubai.desktop"
+
+# Criar atalho na Área de Trabalho do Usuário (Desktop)
+USER_DESKTOP_DIR=""
+if command -v xdg-user-dir &>/dev/null; then
+  USER_DESKTOP_DIR="$(xdg-user-dir DESKTOP 2>/dev/null || echo "")"
+fi
+if [ -z "$USER_DESKTOP_DIR" ] || [ ! -d "$USER_DESKTOP_DIR" ]; then
+  USER_DESKTOP_DIR="$HOME/Desktop"
+fi
+
+if [ -d "$USER_DESKTOP_DIR" ]; then
+  cp "$DESKTOP_DIR/hubai.desktop" "$USER_DESKTOP_DIR/hubai.desktop"
+  chmod +x "$USER_DESKTOP_DIR/hubai.desktop"
+  if command -v gio &>/dev/null; then
+    gio set "$USER_DESKTOP_DIR/hubai.desktop" metadata::trusted true 2>/dev/null || true
+  fi
+  echo "✓ Atalho criado na Área de Trabalho: $USER_DESKTOP_DIR/hubai.desktop"
+fi
+
+# Fixar atalho na Dock do Ubuntu / GNOME Shell
+if command -v gsettings &>/dev/null; then
+  CURRENT_FAVORITES=$(gsettings get org.gnome.shell favorite-apps 2>/dev/null || echo "")
+  if [ -n "$CURRENT_FAVORITES" ] && [[ "$CURRENT_FAVORITES" != *"hubai.desktop"* ]]; then
+    NEW_FAVORITES=$(echo "$CURRENT_FAVORITES" | sed "s/]/, 'hubai.desktop']/" | sed "s/\\[, /\\[/")
+    gsettings set org.gnome.shell favorite-apps "$NEW_FAVORITES" 2>/dev/null || true
+    echo "✓ Atalho fixado automaticamente na Dock do Ubuntu/GNOME."
+  fi
+fi
+
+# Atualizar base de atalhos do sistema
+if command -v update-desktop-database &>/dev/null; then
+  update-desktop-database "$DESKTOP_DIR" &>/dev/null || true
+fi
 
 echo ""
 echo "=================================================="
@@ -263,9 +305,13 @@ echo "=================================================="
 echo "Diretório da aplicação: $INSTALL_DIR"
 echo "Configuração do usuário: $CONFIG_DIR (preservada)"
 echo "Comando no terminal:     hubai"
-echo "Atualizador autônomo:    $UPDATER_PATH"
 echo "Atalho no menu:          HubAI (.desktop)"
+echo "Atalho na Área Trabalho: $USER_DESKTOP_DIR/hubai.desktop"
+echo "Dock do Ubuntu:          Fixado na barra lateral"
+echo "Atualizador autônomo:    $UPDATER_PATH"
+echo "Desinstalador completo:  hubai uninstall --purge"
 echo ""
-echo "Para iniciar o aplicativo agora, execute: hubai"
-echo "Ou abra o 'HubAI' pelo menu do seu sistema operacional."
+echo "Para iniciar o aplicativo:"
+echo "  • Clique no ícone do HubAI na Dock do Ubuntu ou na Área de Trabalho"
+echo "  • Ou execute no terminal: hubai (inicia e libera o terminal imediatamente)"
 echo ""

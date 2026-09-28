@@ -17,7 +17,7 @@ LOG_DIR="$HUBAI_CONFIG_DIR/logs"
 LOG_FILE="$LOG_DIR/hubai.log"
 
 # Suporte a porta customizada via flag (--port / -p) ou variável de ambiente ($PORT / $HUBAI_PORT)
-PORT="${PORT:-${HUBAI_PORT:-3000}}"
+PORT="${PORT:-${HUBAI_PORT:-8080}}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --port|-p)
