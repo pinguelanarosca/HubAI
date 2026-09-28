@@ -248,24 +248,39 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
                     <h3 className="text-sm font-semibold">
                       {status.hasUpdate
                         ? 'Atualização disponível no GitHub!'
-                        : 'HubAI já está na versão mais recente.'}
+                        : 'HubAI sincronizado com o repositório.'}
                     </h3>
                     <p className="text-xs opacity-80 mt-1 leading-normal">
                       {status.hasUpdate
                         ? 'Uma nova versão está disponível no repositório oficial. A atualização será executada de forma atômica por um processo externo com backup prévio.'
-                        : 'Você está utilizando a versão mais recente registrada no ambiente Linux.'}
+                        : 'Sua instalação está idêntica ou atualizada com o repositório GitHub.'}
                     </p>
                   </div>
                 </div>
 
-                <button
-                  onClick={() => loadStatus(true)}
-                  disabled={phase === 'checking'}
-                  className="px-2.5 py-1 text-xs rounded bg-neutral-900/60 hover:bg-neutral-900 border border-neutral-700/60 text-neutral-300 hover:text-white shrink-0 transition-colors flex items-center gap-1.5"
-                >
-                  <RefreshCw className={`w-3 h-3 ${phase === 'checking' ? 'animate-spin' : ''}`} />
-                  <span>Verificar</span>
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => loadStatus(true)}
+                    disabled={phase === 'checking'}
+                    className="px-2.5 py-1.5 text-xs rounded-lg bg-neutral-900/80 hover:bg-neutral-900 border border-neutral-700/80 text-neutral-300 hover:text-white transition-colors flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${phase === 'checking' ? 'animate-spin' : ''}`} />
+                    <span>Verificar</span>
+                  </button>
+
+                  <button
+                    onClick={handleApplyUpdate}
+                    disabled={phase === 'checking'}
+                    className={`px-3 py-1.5 text-xs rounded-lg font-medium shadow-md transition-colors flex items-center gap-1.5 ${
+                      status.hasUpdate
+                        ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-950/50'
+                        : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700'
+                    }`}
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>{status.hasUpdate ? 'Atualizar Agora' : 'Forçar Atualização'}</span>
+                  </button>
+                </div>
               </div>
 
               {/* Version Comparison Table */}
@@ -490,13 +505,17 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
             Fechar
           </button>
 
-          {status?.hasUpdate && phase !== 'updating' && phase !== 'restarting' && (
+          {status && phase !== 'updating' && phase !== 'restarting' && (
             <button
               onClick={handleApplyUpdate}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg shadow-lg shadow-indigo-950/50 transition-colors"
+              className={`flex items-center gap-2 px-4 py-2 text-xs font-medium rounded-lg shadow-lg transition-colors ${
+                status.hasUpdate
+                  ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-950/50 font-semibold'
+                  : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700'
+              }`}
             >
               <RefreshCw className="w-3.5 h-3.5" />
-              <span>Atualizar Hub Agora</span>
+              <span>{status.hasUpdate ? 'Atualizar Hub Agora' : 'Forçar Atualização do Hub'}</span>
             </button>
           )}
         </div>
