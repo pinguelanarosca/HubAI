@@ -360,158 +360,48 @@ async function runIntegrationTests() {
     console.log('✓ PASSOU: Diretório de configurações do usuário é 100% preservado.');
 
     // -------------------------------------------------------------------------
-    // TESTE 11: Testando ponte de enriquecimento DOM em tempo real (EnrichmentService Bridge)
+    // TESTE 11: Testando salvamento em tempo real de observações/notas
     // -------------------------------------------------------------------------
-    console.log('[TESTE 11] Testando ponte de enriquecimento DOM em tempo real (EnrichmentService Bridge)...');
-    const { enrichmentService } = await import('../server/enrichmentService.js');
-    const activeAccount = configManager.getConfig().accounts[0];
+    console.log('[TESTE 11] Testando salvamento em tempo real de observações/notas...');
+    const activeAccount = testConfigManager.getConfig().accounts[0];
     assert.ok(activeAccount, 'Deve haver ao menos uma conta no config de teste');
 
-    // 1. Sem relatório DOM enviado: deve retornar '--' e status 'unavailable' sem dados fictícios
-    const initialStatus = await enrichmentService.getAccountStatus(activeAccount, 'chatgpt', false);
-    assert.strictEqual(initialStatus.accountId, activeAccount.id);
-    assert.strictEqual(initialStatus.providerId, 'chatgpt');
-    assert.strictEqual(initialStatus.planName, '--');
-    assert.strictEqual(initialStatus.hasProjectsConcept, true);
-    assert.strictEqual(initialStatus.usage.limitLabel, '--');
-    assert.strictEqual(initialStatus.syncState, 'unavailable');
+    // Editar observações da conta diretamente
+    const newNotesText = 'Nota autogerada em tempo real para testes';
+    activeAccount.notes = newNotesText;
 
-    // 2. Enviar relatório DOM real simulando coleta da ponte do Chrome
-    const mockBridgeReport = {
-      providerId: 'chatgpt',
-      accountId: activeAccount.id,
-      chromeProfileDir: activeAccount.chromeProfileDir,
-      extractedAt: new Date().toISOString(),
-      platformData: {
-        accountName: 'Alexandre Real',
-        accountEmail: 'alexandre.real@gmail.com',
-        profilePictureUrl: 'https://lh3.googleusercontent.com/a/mock-avatar.png',
-        planName: 'Plus',
-        projects: [{ id: 'p1', name: 'Automação Python' }],
-        recentChats: [{ id: 'c1', title: 'Refatoração de Código', timeOrDate: '14:20' }],
-        usage: {
-          limitStatus: 'available' as const,
-          limitLabel: '40 msgs / 3 horas',
-          resetTime: '17:00',
-          details: 'Coletado da interface web do ChatGPT'
-        }
-      }
-    };
+    // Salvar configuração com as novas observações
+    const updatedConfigWithNotes = { ...testConfigManager.getConfig() };
+    updatedConfigWithNotes.accounts = updatedConfigWithNotes.accounts.map(a =>
+      a.id === activeAccount.id ? { ...a, notes: newNotesText } : a
+    );
 
-    const processResult = enrichmentService.processBridgeReport(mockBridgeReport);
-    assert.strictEqual(processResult.success, true);
+    testConfigManager.saveConfig(updatedConfigWithNotes);
 
-    // 3. Verificar que o status da conta foi atualizado com os dados reais do DOM
-    const updatedStatus = await enrichmentService.getAccountStatus(activeAccount, 'chatgpt', false);
-    assert.strictEqual(updatedStatus.accountName, 'Alexandre Real');
-    assert.strictEqual(updatedStatus.accountEmail, 'alexandre.real@gmail.com');
-    assert.strictEqual(updatedStatus.profilePictureUrl, 'https://lh3.googleusercontent.com/a/mock-avatar.png');
-    assert.strictEqual(updatedStatus.planName, 'Plus');
-    assert.strictEqual(updatedStatus.projects.length, 1);
-    assert.strictEqual(updatedStatus.projects[0].name, 'Automação Python');
-    assert.strictEqual(updatedStatus.recentChats[0].title, 'Refatoração de Código');
-    assert.strictEqual(updatedStatus.usage.limitLabel, '40 msgs / 3 horas');
-    assert.strictEqual(updatedStatus.syncState, 'synced');
-
-    const geminiStatus = await enrichmentService.getAccountStatus(activeAccount, 'gemini', false);
-    assert.strictEqual(geminiStatus.hasProjectsConcept, false, 'Gemini não possui conceito de projetos');
-    assert.strictEqual(geminiStatus.projects.length, 0);
-
-    console.log('✓ PASSOU: Ponte de coleta DOM e atualização de estado validadas com sucesso.');
+    // Carregar e verificar persistência
+    const reloadedConfigWithNotes = new ConfigManager(tempUserConfigDir).getConfig();
+    const reloadedAccount = reloadedConfigWithNotes.accounts.find(a => a.id === activeAccount.id);
+    assert.ok(reloadedAccount);
+    assert.strictEqual(reloadedAccount.notes, newNotesText, 'As observações devem ter sido salvas com sucesso no arquivo de configuração!');
+    console.log('✓ PASSOU: Observações atualizadas e persistidas de forma determinística.');
 
     // -------------------------------------------------------------------------
-    // TESTE 12: Validação rigorosa das 10 regras obrigatórias da Ponte de Coleta
+    // TESTE 12: Validação de campo vazio/compactação de texto nas observações
     // -------------------------------------------------------------------------
-    console.log('[TESTE 12] Verificando as 10 regras obrigatórias da Ponte e Sincronização...');
+    console.log('[TESTE 12] Verificando comportamento de observações vazias...');
+    // Verificar que conta sem notas retorna string vazia ou undefined e é suportada
+    const emptyNotesAccount = reloadedConfigWithNotes.accounts[0];
+    emptyNotesAccount.notes = '';
+    const updatedConfigWithEmpty = { ...reloadedConfigWithNotes, accounts: reloadedConfigWithNotes.accounts.map(a =>
+      a.id === emptyNotesAccount.id ? { ...a, notes: '' } : a
+    ) };
+    testConfigManager.saveConfig(updatedConfigWithEmpty);
 
-    // Rule 1: Relatório sem accountId é rejeitado
-    const noAccountReport = {
-      providerId: 'chatgpt',
-      accountId: '',
-      extractedAt: new Date().toISOString(),
-      platformData: { planName: 'Plus' }
-    };
-    const res1 = enrichmentService.processBridgeReport(noAccountReport as any);
-    assert.strictEqual(res1.success, false, 'Relatório sem accountId DEVE ser rejeitado!');
-
-    // Rule 2 & 3: Relatório com conta desconhecida NÃO cai na primeira conta; Conta 2 atualiza somente Conta 2
-    const currentAccounts = configManager.getConfig().accounts;
-    const targetAcc1 = currentAccounts[0];
-    const targetAcc2 = currentAccounts.length > 1 ? currentAccounts[1] : { id: 'acc_2', name: 'Conta 2 Teste', chromeProfileDir: 'Profile 2' };
-
-    const initialAcc1Status = await enrichmentService.getAccountStatus(targetAcc1, 'chatgpt', false);
-    const unknownAccReport = {
-      providerId: 'chatgpt',
-      accountId: 'conta_totalmente_fantasma_999',
-      extractedAt: new Date().toISOString(),
-      platformData: { planName: 'Pro' }
-    };
-    const res2 = enrichmentService.processBridgeReport(unknownAccReport as any);
-    assert.strictEqual(res2.success, false, 'Relatório para conta desconhecida deve ser rejeitado!');
-
-    const afterUnknownStatus = await enrichmentService.getAccountStatus(targetAcc1, 'chatgpt', false);
-    assert.strictEqual(afterUnknownStatus.lastSyncAt, initialAcc1Status.lastSyncAt, 'Conta 1 NÃO pode ser alterada por relatório de outra conta!');
-
-    // Rule 4 & 5: Botão Sincronizar dispara solicitação de coleta (requestSync) e registra pending sync
-    const syncReqStatus = enrichmentService.requestSync(targetAcc1.id, 'chatgpt');
-    assert.strictEqual(syncReqStatus.syncState, 'syncing');
-    assert.strictEqual(enrichmentService.isSyncPending(targetAcc1.id, 'chatgpt'), true, 'Solicitação de sincronização deve estar pendente!');
-
-    // Rule 6: Porta configurada é utilizada no bridge-config.json gerado pelo launcher
-    const { prepareAccountBridgeDir } = await import('../server/launcherService.js');
-    const bridgeFolder = prepareAccountBridgeDir(targetAcc1.id, 9090);
-    const bridgeCfgPath = path.join(bridgeFolder, 'bridge-config.json');
-    assert.strictEqual(fs.existsSync(bridgeCfgPath), true, 'bridge-config.json deve existir');
-    const bridgeCfgJson = JSON.parse(fs.readFileSync(bridgeCfgPath, 'utf-8'));
-    assert.strictEqual(bridgeCfgJson.accountId, targetAcc1.id);
-    assert.ok(bridgeCfgJson.serverUrl.includes('9090'), 'A porta 9090 configurada deve estar presente no serverUrl!');
-
-    // Rule 7: :contains() não existe em content.js
-    const contentJsPath = path.resolve(process.cwd(), 'chrome-extension', 'content.js');
-    const contentJsText = fs.readFileSync(contentJsPath, 'utf-8');
-    assert.strictEqual(contentJsText.includes(':contains('), false, 'O seletor inválido :contains() NUNCA deve existir no content.js!');
-
-    // Rule 8: Ausência de dados resulta em '--'
-    const emptyAccount: any = { id: 'acc_vazia_test', name: 'Conta Vazia', chromeProfileDir: 'Profile 99' };
-    const emptyStatus = await enrichmentService.getAccountStatus(emptyAccount, 'chatgpt', false);
-    assert.strictEqual(emptyStatus.planName, '--');
-    assert.strictEqual(emptyStatus.usage.limitLabel, '--');
-    assert.strictEqual(emptyStatus.usage.resetTime, '--');
-
-    // Rule 9: synced só ocorre após coleta real do DOM
-    assert.strictEqual(emptyStatus.syncState, 'unavailable', 'Sem coleta real o status deve ser unavailable!');
-
-    // Rule 10: Avatar fica associado à conta correta
-    const avatarUrl = 'https://lh3.googleusercontent.com/a/real-photo-acc1.png';
-    const acc1RealReport = {
-      providerId: 'chatgpt',
-      accountId: targetAcc1.id,
-      extractedAt: new Date().toISOString(),
-      platformData: {
-        accountName: 'Alexandre Autêntico',
-        profilePictureUrl: avatarUrl,
-        planName: 'Plus'
-      }
-    };
-    const resAcc1 = enrichmentService.processBridgeReport(acc1RealReport as any);
-    assert.strictEqual(resAcc1.success, true);
-    const acc1SyncedStatus = await enrichmentService.getAccountStatus(targetAcc1, 'chatgpt', false);
-    assert.strictEqual(acc1SyncedStatus.profilePictureUrl, avatarUrl, 'Avatar real deve ser associado à conta correta!');
-    assert.strictEqual(acc1SyncedStatus.syncState, 'synced', 'Status deve ser synced após relatório real!');
-
-    // Rule 11: O estado 'syncing' expira após o tempo limite e transiciona para 'unavailable'
-    enrichmentService.requestSync(targetAcc1.id, 'claude');
-    const syncingClaude = await enrichmentService.getAccountStatus(targetAcc1, 'claude', false);
-    assert.strictEqual(syncingClaude.syncState, 'syncing', 'Deve estar inicialmente em syncing');
-
-    // Force expiration by manipulating the pendingSyncs timestamp
-    const syncKey = `${targetAcc1.id}:claude`;
-    (enrichmentService as any).pendingSyncs.set(syncKey, Date.now() - 20000); // 20s ago
-    const expiredClaude = await enrichmentService.getAccountStatus(targetAcc1, 'claude', false);
-    assert.strictEqual(expiredClaude.syncState, 'unavailable', 'Após 15s o estado syncing deve expirar para unavailable!');
-    assert.ok(expiredClaude.syncMessage && expiredClaude.syncMessage.includes('Tempo limite esgotado'), 'Mensagem deve indicar tempo limite esgotado');
-
-    console.log('✓ PASSOU: Todas as 11 regras obrigatórias de ponte e sincronização validadas com 100% de sucesso.');
+    const reloadedConfigWithEmpty = new ConfigManager(tempUserConfigDir).getConfig();
+    const reloadedEmptyAccount = reloadedConfigWithEmpty.accounts.find(a => a.id === emptyNotesAccount.id);
+    assert.ok(reloadedEmptyAccount);
+    assert.strictEqual(reloadedEmptyAccount.notes, '', 'Notas vazias devem ser suportadas sem corromper o arquivo!');
+    console.log('✓ PASSOU: Observações vazias validadas com sucesso.');
 
     console.log('\n================================================================');
     console.log('  TODOS OS 11 TESTES DE INTEGRAÇÃO & ATUALIZAÇÃO FORAM APROVADOS! ');

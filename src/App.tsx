@@ -124,6 +124,20 @@ export default function App() {
     }
   };
 
+  const handleUpdateNotes = async (accountId: string, notes: string) => {
+    if (!config) return;
+    const updatedAccounts = config.accounts.map(a =>
+      a.id === accountId ? { ...a, notes } : a
+    );
+    const newConfig = { ...config, accounts: updatedAccounts };
+    try {
+      const saved = await saveHubConfig(newConfig);
+      setConfig(saved);
+    } catch (err: any) {
+      console.error(`Erro ao salvar observações: ${err.message}`);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center text-neutral-400 gap-3">
@@ -195,6 +209,7 @@ export default function App() {
                 activeProvider={activeProvider}
                 onLaunch={handleLaunch}
                 onEditAccount={(acc) => setEditingAccount(acc)}
+                onUpdateNotes={handleUpdateNotes}
                 launchingAccountId={launchingAccountId}
               />
             )}

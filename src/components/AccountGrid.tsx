@@ -1,14 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { HubAccount, AIProvider, AccountStatus } from '../types.js';
+import React, { useState } from 'react';
+import { HubAccount, AIProvider } from '../types.js';
 import { AccountCard } from './AccountCard.js';
-import { Search, Shield, Zap, RotateCw } from '../utils/icons.js';
-import { fetchAccountEnrichments, syncAccountStatus } from '../services/api.js';
+import { Search } from '../utils/icons.js';
 
 interface AccountGridProps {
   accounts: HubAccount[];
   activeProvider: AIProvider;
   onLaunch: (accountId: string, dryRun?: boolean) => void;
   onEditAccount: (account: HubAccount) => void;
+  onUpdateNotes?: (accountId: string, notes: string) => void;
   launchingAccountId?: string | null;
 }
 
@@ -17,64 +17,10 @@ export const AccountGrid: React.FC<AccountGridProps> = ({
   activeProvider,
   onLaunch,
   onEditAccount,
+  onUpdateNotes,
   launchingAccountId
 }) => {
   const [filterQuery, setFilterQuery] = useState('');
-  const [enrichments, setEnrichments] = useState<Record<string, AccountStatus>>({});
-  const [isLoadingEnrichments, setIsLoadingEnrichments] = useState(false);
-  const [syncingAccountId, setSyncingAccountId] = useState<string | null>(null);
-
-  const loadEnrichments = async (force: boolean = false) => {
-    setIsLoadingEnrichments(true);
-    try {
-      const data = await fetchAccountEnrichments(activeProvider.id, force);
-      setEnrichments(data || {});
-    } catch (err) {
-      console.warn('[AccountGrid] Erro ao carregar informações enriquecidas:', err);
-    } finally {
-      setIsLoadingEnrichments(false);
-    }
-  };
-
-  useEffect(() => {
-    loadEnrichments(false);
-  }, [activeProvider.id, accounts.length]);
-
-  // Polling ativo quando qualquer conta estiver no estado 'syncing'
-  useEffect(() => {
-    const hasSyncing = accounts.some(acc => enrichments[acc.id]?.syncState === 'syncing');
-    if (!hasSyncing) return;
-
-    const interval = setInterval(async () => {
-      try {
-        const data = await fetchAccountEnrichments(activeProvider.id, false);
-        setEnrichments(data || {});
-      } catch (err) {
-        console.warn('[AccountGrid] Erro ao atualizar enriquecimentos por polling:', err);
-      }
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [accounts, enrichments, activeProvider.id]);
-
-  const handleSyncAccount = async (accountId: string) => {
-    setSyncingAccountId(accountId);
-    try {
-      const updatedStatus = await syncAccountStatus(accountId, activeProvider.id);
-      setEnrichments((prev) => ({
-        ...prev,
-        [accountId]: updatedStatus
-      }));
-    } catch (err) {
-      console.error(`[AccountGrid] Falha ao sincronizar conta ${accountId}:`, err);
-    } finally {
-      setSyncingAccountId(null);
-    }
-  };
-
-  const handleSyncAll = () => {
-    loadEnrichments(true);
-  };
 
   const sortedAccounts = [...accounts].sort((a, b) => a.order - b.order);
   const filteredAccounts = sortedAccounts.filter(
@@ -87,7 +33,7 @@ export const AccountGrid: React.FC<AccountGridProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* Subheader, Sync All & Filter Bar */}
+      {/* Subheader & Filter Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-semibold text-neutral-200">
@@ -99,16 +45,6 @@ export const AccountGrid: React.FC<AccountGridProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleSyncAll}
-            disabled={isLoadingEnrichments}
-            className="px-2.5 py-1.5 text-xs font-medium bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 rounded-md text-neutral-300 hover:text-white transition-colors flex items-center gap-1.5 shrink-0"
-            title="Atualizar dados de sessão de todas as contas"
-          >
-            <RotateCw className={`w-3 h-3 text-indigo-400 ${isLoadingEnrichments ? 'animate-spin' : ''}`} />
-            <span>Atualizar Sessões</span>
-          </button>
-
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-neutral-500 absolute left-2.5 top-2.5" />
             <input
@@ -129,12 +65,10 @@ export const AccountGrid: React.FC<AccountGridProps> = ({
             key={account.id}
             account={account}
             activeProvider={activeProvider}
-            status={enrichments[account.id]}
             onLaunch={onLaunch}
             onEdit={onEditAccount}
-            onSyncAccount={handleSyncAccount}
+            onUpdateNotes={onUpdateNotes}
             isLaunching={launchingAccountId === account.id}
-            isSyncing={syncingAccountId === account.id}
           />
         ))}
       </div>
