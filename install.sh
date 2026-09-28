@@ -265,14 +265,20 @@ EOF
 
 chmod +x "$DESKTOP_DIR/hubai.desktop"
 
-# Criar atalho na Área de Trabalho do Usuário (Desktop)
+# Criar atalho na Área de Trabalho do Usuário (Desktop / Área de Trabalho)
 USER_DESKTOP_DIR=""
 if command -v xdg-user-dir &>/dev/null; then
   USER_DESKTOP_DIR="$(xdg-user-dir DESKTOP 2>/dev/null || echo "")"
 fi
-if [ -z "$USER_DESKTOP_DIR" ] || [ ! -d "$USER_DESKTOP_DIR" ]; then
-  USER_DESKTOP_DIR="$HOME/Desktop"
+if [ -z "$USER_DESKTOP_DIR" ]; then
+  if [ -d "$HOME/Área de Trabalho" ]; then
+    USER_DESKTOP_DIR="$HOME/Área de Trabalho"
+  else
+    USER_DESKTOP_DIR="$HOME/Desktop"
+  fi
 fi
+
+mkdir -p "$USER_DESKTOP_DIR"
 
 if [ -d "$USER_DESKTOP_DIR" ]; then
   cp "$DESKTOP_DIR/hubai.desktop" "$USER_DESKTOP_DIR/hubai.desktop"
