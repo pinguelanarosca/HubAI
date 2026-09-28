@@ -39,6 +39,12 @@ export interface ChatSummary {
   url?: string;
 }
 
+export interface HistoryLogItem {
+  timestamp: string;
+  url: string;
+  title: string;
+}
+
 export interface UsageStatus {
   limitStatus: 'available' | 'exceeded' | 'warning' | 'unknown';
   limitLabel: string; // e.g. "Disponível", "Excedido", "Não informado"

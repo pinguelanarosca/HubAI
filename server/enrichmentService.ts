@@ -6,7 +6,8 @@ import {
   AccountStatus,
   ProjectSummary,
   ChatSummary,
-  UsageStatus
+  UsageStatus,
+  HistoryLogItem
 } from '../src/types.js';
 import { configManager } from './configManager.js';
 
@@ -26,6 +27,7 @@ export interface BridgeSyncReport {
   accountId: string;
   chromeProfileDir?: string;
   url?: string;
+  title?: string;
   extractedAt: string;
   platformData: BridgePlatformData;
 }
@@ -34,12 +36,16 @@ export class EnrichmentService {
   private cacheFile: string;
   private cache: Record<string, AccountStatus> = {}; // key: `${accountId}:${providerId}`
   private pendingSyncs: Map<string, number> = new Map(); // key: `${accountId}:${providerId}`, value: timestamp
+  private historyFile: string;
+  private historyCache: Record<string, HistoryLogItem[]> = {}; // key: `${accountId}:${providerId}`
 
   constructor() {
     const configDir = process.env.HUBAI_CONFIG_DIR || path.join(os.homedir(), '.config', 'hubai');
     fs.mkdirSync(configDir, { recursive: true });
     this.cacheFile = path.join(configDir, 'enrichment-cache.json');
+    this.historyFile = path.join(configDir, 'history-cache.json');
     this.loadCache();
+    this.loadHistory();
   }
 
   private loadCache() {
@@ -54,6 +60,18 @@ export class EnrichmentService {
     }
   }
 
+  private loadHistory() {
+    if (fs.existsSync(this.historyFile)) {
+      try {
+        const raw = fs.readFileSync(this.historyFile, 'utf-8');
+        this.historyCache = JSON.parse(raw);
+      } catch (err) {
+        console.warn('[EnrichmentService] Erro ao carregar cache de histórico:', err);
+        this.historyCache = {};
+      }
+    }
+  }
+
   private saveCache() {
     try {
       const dir = path.dirname(this.cacheFile);
@@ -61,6 +79,16 @@ export class EnrichmentService {
       fs.writeFileSync(this.cacheFile, JSON.stringify(this.cache, null, 2), 'utf-8');
     } catch (err) {
       console.error('[EnrichmentService] Erro ao salvar cache de enriquecimento:', err);
+    }
+  }
+
+  private saveHistory() {
+    try {
+      const dir = path.dirname(this.historyFile);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(this.historyFile, JSON.stringify(this.historyCache, null, 2), 'utf-8');
+    } catch (err) {
+      console.error('[EnrichmentService] Erro ao salvar cache de histórico:', err);
     }
   }
 
@@ -185,6 +213,27 @@ export class EnrichmentService {
     this.cache[key] = updatedStatus;
     this.saveCache();
 
+    // Capture accessed URL/title history if it matches the active provider criteria
+    const url = report.url;
+    const title = report.title || '';
+    if (url && this.urlMatchesProvider(url, providerId)) {
+      const historyKey = `${account.id}:${providerId}`;
+      const logs = this.historyCache[historyKey] || [];
+      const lastLog = logs[logs.length - 1];
+      
+      // Append a new log item only if the URL or title changed
+      if (!lastLog || lastLog.url !== url || lastLog.title !== title) {
+        logs.push({
+          timestamp: new Date().toISOString(),
+          url,
+          title
+        });
+        this.historyCache[historyKey] = logs;
+        this.saveHistory();
+        console.log(`[EnrichmentService] Histórico registrado para ${historyKey}:`, { url, title });
+      }
+    }
+
     console.log(`[EnrichmentService] Relatório DOM verificado para conta "${account.name}" (${providerId}):`, updatedStatus);
 
     return {
@@ -262,6 +311,41 @@ export class EnrichmentService {
     }
 
     return result;
+  }
+
+  public urlMatchesProvider(url: string, providerId: string): boolean {
+    if (!url) return false;
+    const normalizedUrl = url.toLowerCase();
+    
+    switch (providerId) {
+      case 'gemini':
+        return normalizedUrl.includes('gemini') || normalizedUrl.includes('google');
+      case 'chatgpt':
+      case 'openai':
+        return normalizedUrl.includes('chatgpt') || normalizedUrl.includes('openai');
+      case 'claude':
+        return normalizedUrl.includes('claude') || normalizedUrl.includes('anthropic');
+      case 'meta_ai':
+      case 'meta':
+        return normalizedUrl.includes('meta') || normalizedUrl.includes('llama');
+      case 'grok':
+        return normalizedUrl.includes('grok') || normalizedUrl.includes('spacex') || normalizedUrl.includes('x.com') || normalizedUrl.includes('x.ai') || normalizedUrl.includes('twitter');
+      case 'ai_studios':
+        return normalizedUrl.includes('aistudio') || normalizedUrl.includes('google');
+      default:
+        return normalizedUrl.includes(providerId.toLowerCase());
+    }
+  }
+
+  public getHistory(accountId: string, providerId: string): HistoryLogItem[] {
+    const key = `${accountId}:${providerId}`;
+    return this.historyCache[key] || [];
+  }
+
+  public clearHistory(accountId: string, providerId: string) {
+    const key = `${accountId}:${providerId}`;
+    this.historyCache[key] = [];
+    this.saveHistory();
   }
 }
 

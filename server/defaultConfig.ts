@@ -77,6 +77,18 @@ export const defaultHubConfig: HubConfig = {
       badge: 'Meta',
       enabled: true,
       order: 5
+    },
+    {
+      id: 'ai_studios',
+      name: 'Google AI Studio',
+      shortName: 'AI Studios',
+      defaultUrl: 'https://aistudio.google.com',
+      category: 'code',
+      icon: 'Terminal',
+      description: 'Google AI Studio developer workspace for Gemini models',
+      badge: 'Google',
+      enabled: true,
+      order: 6
     }
   ],
   accounts: [

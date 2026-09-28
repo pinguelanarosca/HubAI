@@ -9,7 +9,8 @@ import {
   BrowserVariant,
   UpdateStatus,
   UpdateApplyResult,
-  AccountStatus
+  AccountStatus,
+  HistoryLogItem
 } from '../types.js';
 
 export async function fetchHubConfig(): Promise<HubConfig> {
@@ -117,6 +118,26 @@ export async function fetchBrowserVariants(): Promise<BrowserVariant[]> {
   }
   const data = await res.json();
   return data.variants;
+}
+
+export async function fetchAccountHistory(accountId: string, providerId: string): Promise<HistoryLogItem[]> {
+  const res = await fetch(`/api/accounts/${accountId}/history?providerId=${encodeURIComponent(providerId)}`);
+  if (!res.ok) {
+    throw new Error('Falha ao buscar histórico de URLs');
+  }
+  const data = await res.json();
+  return data.history || [];
+}
+
+export async function clearAccountHistory(accountId: string, providerId: string): Promise<void> {
+  const res = await fetch(`/api/accounts/${accountId}/history/clear`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ providerId })
+  });
+  if (!res.ok) {
+    throw new Error('Falha ao limpar histórico de URLs');
+  }
 }
 
 export async function launchPlatform(req: LaunchRequest): Promise<LaunchResult> {

@@ -42,6 +42,7 @@
     if (url.includes('gemini.google.com')) return 'gemini';
     if (url.includes('grok.com')) return 'grok';
     if (url.includes('meta.ai')) return 'meta_ai';
+    if (url.includes('aistudio.google.com')) return 'ai_studios';
     return 'unknown';
   }
 
@@ -382,6 +383,15 @@
     else if (providerId === 'gemini') collectedData = extractGemini();
     else if (providerId === 'grok') collectedData = extractGrok();
     else if (providerId === 'meta_ai') collectedData = extractMetaAI();
+    else if (providerId === 'ai_studios') {
+      collectedData = {
+        accountName: document.querySelector('.user-profile-name, [class*="profile"]')?.innerText || undefined,
+        accountEmail: undefined,
+        planName: 'Developer',
+        projects: [],
+        recentChats: []
+      };
+    }
 
     if (!collectedData) return;
 
@@ -389,6 +399,7 @@
       accountId: bridgeConfig.accountId,
       providerId: providerId,
       url: url,
+      title: document.title,
       extractedAt: new Date().toISOString(),
       platformData: collectedData
     };

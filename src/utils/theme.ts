@@ -101,6 +101,23 @@ export const PROVIDER_THEMES: Record<string, ProviderTheme> = {
     decoratorColor: 'text-neutral-500/15',
     badgeStyle: 'bg-neutral-800 text-neutral-200 border-neutral-700',
     glowBg: 'bg-neutral-400'
+  },
+  ai_studios: {
+    id: 'ai_studios',
+    accentText: 'text-indigo-400',
+    sidebarSelected: 'bg-gradient-to-r from-indigo-950/40 to-violet-950/30 text-indigo-200 border-indigo-500/50 shadow-[0_0_12px_-3px_rgba(99,102,241,0.35)] backdrop-blur-md',
+    iconAccent: 'bg-indigo-500/20 text-indigo-300 border border-indigo-400/30',
+    cardBorder: 'hover:border-indigo-500/50 hover:shadow-[0_0_18px_-5px_rgba(99,102,241,0.45)]',
+    cardHeaderLine: 'border-indigo-950/50',
+    notesFocus: 'focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30',
+    launchBtn: 'bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-[0_2px_8px_rgba(99,102,241,0.3)]',
+    validBtn: 'hover:bg-indigo-950/40 hover:text-indigo-300 border border-transparent hover:border-indigo-900/50',
+    cmdBtn: 'hover:bg-indigo-950/40 hover:text-indigo-300 border border-transparent hover:border-indigo-900/50',
+    cardBg: 'backdrop-blur-md bg-neutral-900/60 border-neutral-800/80',
+    decoratorSymbol: '⬢',
+    decoratorColor: 'text-indigo-500/15',
+    badgeStyle: 'bg-indigo-950/60 text-indigo-300 border-indigo-800',
+    glowBg: 'bg-indigo-500'
   }
 };
 

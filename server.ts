@@ -200,6 +200,28 @@ async function startServer() {
     }
   });
 
+  app.get('/api/accounts/:id/history', (req, res) => {
+    try {
+      const accountId = req.params.id;
+      const providerId = (req.query.providerId as string) || 'chatgpt';
+      const history = enrichmentService.getHistory(accountId, providerId);
+      res.json({ success: true, history });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/accounts/:id/history/clear', (req, res) => {
+    try {
+      const accountId = req.params.id;
+      const providerId = req.body.providerId || req.query.providerId || 'chatgpt';
+      enrichmentService.clearHistory(accountId, providerId as string);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   app.post('/api/accounts/:id/sync', async (req, res) => {
     try {
       const accountId = req.params.id;
