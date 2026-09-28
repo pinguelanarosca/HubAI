@@ -195,7 +195,46 @@ export class LauncherService {
     const extraFlags = config.system.additionalFlags || ['--no-first-run'];
 
     // 1. STRICT VALIDATION: Check that the configured browser executable actually exists!
-    const validatedBinary = this.validateBrowserExecutable(browserCommand);
+    let validatedBinary: string | undefined;
+    let binaryWarning: string | undefined;
+
+    try {
+      validatedBinary = this.validateBrowserExecutable(browserCommand);
+    } catch (err: any) {
+      // Check if another installed browser binary exists on host PATH
+      const availableBins = profileScanner.detectBrowserBinaries();
+      if (availableBins && availableBins.length > 0) {
+        validatedBinary = availableBins[0];
+        binaryWarning = `O executável configurado "${browserCommand}" não foi encontrado no PATH, mas "${validatedBinary}" foi localizado e utilizado.`;
+      } else {
+        // No browser binary found on host PATH - generate exact command without crashing
+        const { resolvedUserDataDir } = this.validateRealProfile(effectiveUserDataDir, profileDir);
+        const { fullCommandStr } = this.buildCommand(
+          browserCommand,
+          resolvedUserDataDir,
+          profileDir,
+          targetUrl,
+          openInNewWindow,
+          extraFlags
+        );
+
+        this.configManager.updateAccountLastUsed(account.id);
+
+        return {
+          success: true,
+          command: fullCommandStr,
+          providerName: provider.name,
+          accountName: account.name,
+          profileDir,
+          userDataDir: resolvedUserDataDir,
+          targetUrl,
+          timestamp: new Date().toISOString(),
+          mode: 'command_generated',
+          message: `Comando Linux gerado para o perfil "${profileDir}".`,
+          warning: `Navegador "${browserCommand}" não foi encontrado no PATH do sistema. Copie e execute o comando gerado acima no seu terminal Linux.`
+        };
+      }
+    }
 
     // 2. STRICT VALIDATION: Check real profile on disk first with explicit userDataDir!
     const { resolvedUserDataDir } = this.validateRealProfile(
@@ -228,7 +267,8 @@ export class LauncherService {
         targetUrl,
         timestamp,
         mode: 'dry_run',
-        message: `Executável e perfil real "${profileDir}" validados com sucesso em "${resolvedUserDataDir}". Comando idêntico ao de execução.`
+        message: `Executável e perfil real "${profileDir}" validados com sucesso em "${resolvedUserDataDir}". Comando idêntico ao de execução.`,
+        warning: binaryWarning
       };
     }
 
