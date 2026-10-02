@@ -20,6 +20,21 @@ echo ""
 # 1. Checagem e Auto-Instalação de Pré-requisitos
 echo "[1/6] Verificando e preparando pré-requisitos do sistema..."
 
+# Se existir instalação isolada prévia incompatível (< v22.12.0 ou < v20.19.0), remover para forçar atualização limpa
+if [ -d "$INSTALL_DIR/node" ]; then
+  INSTALLED_NODE="$INSTALL_DIR/node/bin/node"
+  if [ -x "$INSTALLED_NODE" ]; then
+    NODE_MAJ=$("$INSTALLED_NODE" -v 2>/dev/null | cut -d'v' -f2 | cut -d'.' -f1)
+    NODE_MIN=$("$INSTALLED_NODE" -v 2>/dev/null | cut -d'v' -f2 | cut -d'.' -f2)
+    if [ "$NODE_MAJ" -lt 20 ] 2>/dev/null || { [ "$NODE_MAJ" -eq 20 ] && [ "$NODE_MIN" -lt 19 ]; } 2>/dev/null || { [ "$NODE_MAJ" -eq 21 ]; } 2>/dev/null || { [ "$NODE_MAJ" -eq 22 ] && [ "$NODE_MIN" -lt 12 ]; } 2>/dev/null; then
+      echo "Versão incompatível do Node.js ($("$INSTALLED_NODE" -v)) detectada em $INSTALL_DIR/node."
+      echo "Limpando versão antiga para atualizar para Node.js v22 LTS..."
+      rm -rf "$INSTALL_DIR/node"
+      rm -f "$BIN_DIR/node" "$BIN_DIR/npm" "$BIN_DIR/npx"
+    fi
+  fi
+fi
+
 export PATH="$HOME/.local/bin:$INSTALL_DIR/node/bin:/usr/local/bin:$PATH"
 
 if ! command -v bash &>/dev/null; then
@@ -72,7 +87,6 @@ if ! check_node_ready; then
   # Método 1: Download oficial de binário pré-compilado (100% isolado, sem necessidade de sudo/root)
   if [ -n "$DOWNLOAD_CMD" ]; then
     echo "Baixando Node.js LTS oficial ($NODE_VERSION para $NODE_ARCH)..."
-    mkdir -p "$NODE_INSTALL_TARGET"
     mkdir -p "$BIN_DIR"
 
     SUCCESS_DOWNLOAD=false
@@ -83,7 +97,9 @@ if ! check_node_ready; then
     fi
 
     if [ "$SUCCESS_DOWNLOAD" = true ] && [ -d "$TEMP_NODE_DIR/$NODE_DIST_NAME" ]; then
-      cp -r "$TEMP_NODE_DIR/$NODE_DIST_NAME/"* "$NODE_INSTALL_TARGET/"
+      rm -rf "$NODE_INSTALL_TARGET"
+      mkdir -p "$INSTALL_DIR"
+      mv "$TEMP_NODE_DIR/$NODE_DIST_NAME" "$NODE_INSTALL_TARGET"
       ln -sf "$NODE_INSTALL_TARGET/bin/node" "$BIN_DIR/node"
       ln -sf "$NODE_INSTALL_TARGET/bin/npm" "$BIN_DIR/npm"
       ln -sf "$NODE_INSTALL_TARGET/bin/npx" "$BIN_DIR/npx"
@@ -187,11 +203,25 @@ fi
 echo "[4/6] Instalando dependências e compilando aplicação..."
 cd "$INSTALL_DIR"
 
-# Prevenção do bug npm #4828 (remover lockfile pré-existente de outro ambiente)
+# Prevenção do bug npm #4828 e limpeza de módulos corrompidos de execuções anteriores
 rm -f package-lock.json
+if [ -d "$INSTALL_DIR/node_modules" ] && [ ! -f "$INSTALL_DIR/dist/index.html" ]; then
+  echo "Limpando node_modules de compilação anterior incompleta para garantir integridade..."
+  rm -rf "$INSTALL_DIR/node_modules"
+fi
 
-# Instalação limpa incluindo dependências opcionais nativas para a arquitetura local
-npm install --include=optional --no-audit --no-fund || npm install
+# Prevenção de corrupção do cache global do npm ("Class extends value undefined")
+NPM_CACHE_DIR="$INSTALL_DIR/.npm-cache"
+mkdir -p "$NPM_CACHE_DIR"
+
+# Instalação limpa incluindo dependências opcionais nativas para a arquitetura local com cache isolado
+if ! npm install --include=optional --no-audit --no-fund --cache "$NPM_CACHE_DIR"; then
+  echo "Aviso: Primeira tentativa de npm install encontrou falha. Limpando cache e tentando novamente..."
+  rm -rf "$NPM_CACHE_DIR" "$INSTALL_DIR/node_modules"
+  mkdir -p "$NPM_CACHE_DIR"
+  npm cache clean --force 2>/dev/null || true
+  npm install --include=optional --no-audit --no-fund --cache "$NPM_CACHE_DIR"
+fi
 
 # Compilar aplicação com auto-reparo de binding nativo do Rolldown se necessário
 if ! npm run build; then
@@ -199,10 +229,10 @@ if ! npm run build; then
   ARCH=$(uname -m)
   case "$ARCH" in
     x86_64)
-      npm install --save-optional --no-audit --no-fund @rolldown/binding-linux-x64-gnu @rolldown/binding-linux-x64-musl 2>/dev/null || true
+      npm install --save-optional --no-audit --no-fund --cache "$NPM_CACHE_DIR" @rolldown/binding-linux-x64-gnu @rolldown/binding-linux-x64-musl 2>/dev/null || true
       ;;
     aarch64|arm64)
-      npm install --save-optional --no-audit --no-fund @rolldown/binding-linux-arm64-gnu @rolldown/binding-linux-arm64-musl 2>/dev/null || true
+      npm install --save-optional --no-audit --no-fund --cache "$NPM_CACHE_DIR" @rolldown/binding-linux-arm64-gnu @rolldown/binding-linux-arm64-musl 2>/dev/null || true
       ;;
   esac
   echo "Reexecutando compilação do HubAI..."
