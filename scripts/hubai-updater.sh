@@ -129,13 +129,29 @@ fi
 # 4. Instalar Dependências e Compilar no Diretório de Staging
 log "[3/6] Instalando dependências e compilando nova versão no staging..."
 cd "$STAGING_DIR"
+rm -f package-lock.json
 
 BUILD_SUCCESS=false
-if (npm install --legacy-peer-deps || npm install) >> "$LOG_FILE" 2>&1 && npm run build >> "$LOG_FILE" 2>&1; then
+if (npm install --include=optional --no-audit --no-fund || npm install) >> "$LOG_FILE" 2>&1 && npm run build >> "$LOG_FILE" 2>&1; then
   BUILD_SUCCESS=true
   log "✓ Compilação no diretório temporário finalizada com sucesso."
 else
-  log "ERRO: Falha ao compilar a nova versão no diretório temporário!"
+  log "Tentando auto-reparo de bindings nativos para compilação..."
+  ARCH=$(uname -m)
+  case "$ARCH" in
+    x86_64)
+      npm install --save-optional --no-audit --no-fund @rolldown/binding-linux-x64-gnu @rolldown/binding-linux-x64-musl >> "$LOG_FILE" 2>&1 || true
+      ;;
+    aarch64|arm64)
+      npm install --save-optional --no-audit --no-fund @rolldown/binding-linux-arm64-gnu @rolldown/binding-linux-arm64-musl >> "$LOG_FILE" 2>&1 || true
+      ;;
+  esac
+  if npm run build >> "$LOG_FILE" 2>&1; then
+    BUILD_SUCCESS=true
+    log "✓ Compilação no diretório temporário finalizada com sucesso após reparo de bindings."
+  else
+    log "ERRO: Falha ao compilar a nova versão no diretório temporário!"
+  fi
 fi
 
 # 5. Rollback se a compilação falhou

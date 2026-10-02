@@ -29,19 +29,25 @@ fi
 
 check_node_ready() {
   if command -v node &>/dev/null && command -v npm &>/dev/null; then
-    local major
+    local major minor
     major=$(node -v 2>/dev/null | cut -d'v' -f2 | cut -d'.' -f1)
-    if [ -n "$major" ] && [ "$major" -ge 18 ] 2>/dev/null; then
+    minor=$(node -v 2>/dev/null | cut -d'v' -f2 | cut -d'.' -f2)
+    # Vite 8 / Rolldown / @vitejs/plugin-react requer: node: ^20.19.0 || >=22.12.0
+    if [ "$major" -gt 22 ] 2>/dev/null; then
+      return 0
+    elif [ "$major" -eq 22 ] && [ "$minor" -ge 12 ] 2>/dev/null; then
+      return 0
+    elif [ "$major" -eq 20 ] && [ "$minor" -ge 19 ] 2>/dev/null; then
       return 0
     fi
   fi
   return 1
 }
 
-# Auto-instalação e provisionamento de Node.js caso ausente ou desatualizado (< v18)
+# Auto-instalação e provisionamento de Node.js caso ausente ou desatualizado (< v22.12.0)
 if ! check_node_ready; then
-  echo "Node.js v18+ não foi detectado no PATH."
-  echo "Providenciando Node.js automaticamente para o HubAI..."
+  echo "Node.js compativel (>=22.12.0 ou ^20.19.0) não foi detectado no PATH."
+  echo "Providenciando Node.js v22 LTS automaticamente para o HubAI..."
 
   ARCH=$(uname -m)
   case "$ARCH" in
@@ -51,7 +57,7 @@ if ! check_node_ready; then
     *) NODE_ARCH="x64" ;;
   esac
 
-  NODE_VERSION="v20.18.0"
+  NODE_VERSION="v22.23.3"
   NODE_DIST_NAME="node-${NODE_VERSION}-linux-${NODE_ARCH}"
   NODE_INSTALL_TARGET="$INSTALL_DIR/node"
   TEMP_NODE_DIR=$(mktemp -d /tmp/hubai-node-install-XXXXXX)
@@ -148,7 +154,6 @@ if [ -f "$SCRIPT_DIR/package.json" ] && [ -f "$SCRIPT_DIR/server.ts" ]; then
   cp -r "$SCRIPT_DIR/public" "$INSTALL_DIR/" 2>/dev/null || true
   cp -r "$SCRIPT_DIR/chrome-extension" "$INSTALL_DIR/" 2>/dev/null || true
   cp "$SCRIPT_DIR/package.json" "$INSTALL_DIR/" 2>/dev/null || true
-  cp "$SCRIPT_DIR/package-lock.json" "$INSTALL_DIR/" 2>/dev/null || true
   cp "$SCRIPT_DIR/tsconfig.json" "$INSTALL_DIR/" 2>/dev/null || true
   cp "$SCRIPT_DIR/vite.config.ts" "$INSTALL_DIR/" 2>/dev/null || true
   cp "$SCRIPT_DIR/server.ts" "$INSTALL_DIR/" 2>/dev/null || true
@@ -181,8 +186,28 @@ fi
 # 4. Instalar Dependências e Compilar
 echo "[4/6] Instalando dependências e compilando aplicação..."
 cd "$INSTALL_DIR"
-npm install --legacy-peer-deps || npm install
-npm run build
+
+# Prevenção do bug npm #4828 (remover lockfile pré-existente de outro ambiente)
+rm -f package-lock.json
+
+# Instalação limpa incluindo dependências opcionais nativas para a arquitetura local
+npm install --include=optional --no-audit --no-fund || npm install
+
+# Compilar aplicação com auto-reparo de binding nativo do Rolldown se necessário
+if ! npm run build; then
+  echo "Aviso: Primeira tentativa de build do Vite/Rolldown falhou. Instalando bindings nativos para Linux..."
+  ARCH=$(uname -m)
+  case "$ARCH" in
+    x86_64)
+      npm install --save-optional --no-audit --no-fund @rolldown/binding-linux-x64-gnu @rolldown/binding-linux-x64-musl 2>/dev/null || true
+      ;;
+    aarch64|arm64)
+      npm install --save-optional --no-audit --no-fund @rolldown/binding-linux-arm64-gnu @rolldown/binding-linux-arm64-musl 2>/dev/null || true
+      ;;
+  esac
+  echo "Reexecutando compilação do HubAI..."
+  npm run build
+fi
 
 # 5. Instalar Atualizador Externo Autônomo (~/.local/share/hubai-updater.sh)
 echo "[5/6] Instalando atualizador externo e launcher..."
