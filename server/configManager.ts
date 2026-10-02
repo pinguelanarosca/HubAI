@@ -253,6 +253,21 @@ export class ConfigManager {
       resolvedConfig = defaultHubConfig;
     }
 
+    // Ensure any missing system default providers (e.g. ai_studios) are merged into user config
+    let updatedProviders = false;
+    for (const defaultProv of defaultHubConfig.providers) {
+      if (!resolvedConfig.providers.some(p => p.id === defaultProv.id)) {
+        resolvedConfig.providers.push({
+          ...defaultProv,
+          order: resolvedConfig.providers.length + 1
+        });
+        updatedProviders = true;
+      }
+    }
+    if (updatedProviders) {
+      this.saveConfig(resolvedConfig);
+    }
+
     return this.autoDetectAndRepairBrowserCommand(resolvedConfig);
   }
 

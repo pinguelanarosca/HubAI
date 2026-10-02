@@ -2,14 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { HubAccount, AIProvider, HistoryLogItem } from '../types.js';
 import {
   getAccountIcon,
-  ExternalLink,
-  Check,
-  Terminal,
-  Play,
   Shield,
   Clock,
   Trash2,
-  X
+  Search
 } from '../utils/icons.js';
 import { getProviderTheme } from '../utils/theme.js';
 import { fetchAccountHistory, clearAccountHistory, refreshAccountHistory } from '../services/api.js';
@@ -31,9 +27,9 @@ export const AccountCard: React.FC<AccountCardProps> = ({
   onUpdateNotes,
   isLaunching = false
 }) => {
-  const [copiedCmd, setCopiedCmd] = useState(false);
   const [historyList, setHistoryList] = useState<HistoryLogItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const loadHistory = async () => {
     try {
@@ -62,25 +58,14 @@ export const AccountCard: React.FC<AccountCardProps> = ({
     }
   };
 
-  const Icon = getAccountIcon(account.avatarIcon);
-  const theme = getProviderTheme(activeProvider.id);
-
-  // Target URL (check for account-specific override)
-  const targetUrl = account.customUrls?.[activeProvider.id] || activeProvider.defaultUrl;
-  const userDir = account.userDataDir || '~/.config/google-chrome';
-  const linuxCmd = `google-chrome --user-data-dir="${userDir}" --profile-directory="${account.chromeProfileDir}" --new-window "${targetUrl}"`;
-
-  const handleCopyCommand = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(linuxCmd);
-    setCopiedCmd(true);
-    setTimeout(() => setCopiedCmd(false), 2000);
-  };
-
-  const handleDryRun = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onLaunch(account.id, true);
-  };
+  const filteredHistory = historyList.filter((item) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      (item.title && item.title.toLowerCase().includes(q)) ||
+      (item.url && item.url.toLowerCase().includes(q))
+    );
+  });
 
   const handleClearHistory = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -93,6 +78,9 @@ export const AccountCard: React.FC<AccountCardProps> = ({
       }
     }
   };
+
+  const Icon = getAccountIcon(account.avatarIcon);
+  const theme = getProviderTheme(activeProvider.id);
 
   return (
     <div
@@ -164,10 +152,10 @@ export const AccountCard: React.FC<AccountCardProps> = ({
           </div>
         </div>
 
-        {/* Real-time History List (fully integrated directly on the face of the card) */}
-        <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center justify-between border-b border-neutral-800/60 pb-1">
-            <div className="flex items-center gap-1.5">
+        {/* Expanded History List with Discrete Search */}
+        <div className="space-y-1.5 flex-1 flex flex-col min-h-0" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between border-b border-neutral-800/60 pb-1.5 gap-2">
+            <div className="flex items-center gap-1.5 shrink-0">
               <button
                 onClick={handleRefreshHistory}
                 disabled={loadingHistory}
@@ -177,35 +165,55 @@ export const AccountCard: React.FC<AccountCardProps> = ({
                 <Clock className={`w-3.5 h-3.5 ${theme.accentText}`} />
               </button>
               <span className="text-[9px] uppercase font-bold text-neutral-400 tracking-wider">
-                Histórico de Navegação
+                Histórico
               </span>
             </div>
-            {historyList.length > 0 && (
-              <button
-                onClick={handleClearHistory}
-                className="text-[9px] font-bold text-neutral-500 hover:text-rose-400 flex items-center gap-1 px-1 py-0.5 rounded transition-colors"
-                title="Limpar todos os logs"
-              >
-                <Trash2 className="w-2.5 h-2.5" />
-                <span>Limpar</span>
-              </button>
-            )}
+
+            <div className="flex items-center gap-1.5 min-w-0">
+              {/* Discrete search with magnifying glass */}
+              <div className="relative flex items-center">
+                <Search className="w-2.5 h-2.5 text-neutral-500 absolute left-1.5 pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Buscar..."
+                  className="bg-neutral-950/70 border border-neutral-800/80 rounded pl-4 pr-1.5 py-0.5 text-[9px] text-neutral-300 placeholder-neutral-600 focus:outline-none focus:border-neutral-600 w-24 sm:w-28 transition-all font-mono"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </div>
+
+              {historyList.length > 0 && (
+                <button
+                  onClick={handleClearHistory}
+                  className="text-[9px] font-bold text-neutral-500 hover:text-rose-400 flex items-center gap-1 px-1 py-0.5 rounded transition-colors shrink-0"
+                  title="Limpar todos os logs"
+                >
+                  <Trash2 className="w-2.5 h-2.5" />
+                  <span className="hidden sm:inline">Limpar</span>
+                </button>
+              )}
+            </div>
           </div>
 
-          <div className="h-24 overflow-y-auto space-y-1.5 pr-1 select-text scrollbar-thin scrollbar-thumb-neutral-900 text-left">
+          <div className="h-56 overflow-y-auto space-y-1.5 pr-1 select-text scrollbar-thin scrollbar-thumb-neutral-900 text-left">
             {loadingHistory && historyList.length === 0 ? (
               <div className="h-full flex items-center justify-center text-[10px] text-neutral-500 font-mono">
                 Buscando histórico...
               </div>
-            ) : historyList.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center p-2 bg-neutral-950/40 rounded border border-neutral-900/60">
-                <span className="text-[9px] text-neutral-500 font-mono">Nenhum log para {activeProvider.name}.</span>
-                <span className="text-[8px] text-neutral-600 mt-0.5 max-w-[190px] leading-normal">
-                  Clique no ícone de relógio para sincronizar os dados do histórico do Chrome.
+            ) : filteredHistory.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-3 bg-neutral-950/40 rounded border border-neutral-900/60">
+                <span className="text-[9px] text-neutral-500 font-mono">
+                  {searchQuery ? 'Nenhum resultado para a busca.' : `Nenhum log para ${activeProvider.name}.`}
+                </span>
+                <span className="text-[8px] text-neutral-600 mt-1 max-w-[200px] leading-normal">
+                  {searchQuery
+                    ? 'Tente outro termo de busca.'
+                    : 'Clique no ícone de relógio para sincronizar os dados do histórico do Chrome.'}
                 </span>
               </div>
             ) : (
-              historyList.slice(0, 15).map((item, idx) => {
+              filteredHistory.map((item, idx) => {
                 const dateObj = new Date(item.timestamp);
                 const day = String(dateObj.getDate()).padStart(2, '0');
                 const month = String(dateObj.getMonth() + 1).padStart(2, '0');
@@ -246,42 +254,6 @@ export const AccountCard: React.FC<AccountCardProps> = ({
               })
             )}
           </div>
-        </div>
-      </div>
-
-      {/* Footer Controls: Iniciar Janela / Validar / Comando */}
-      <div className={`mt-3 pt-2.5 border-t flex items-center justify-between text-[11px] relative z-10 ${theme.cardHeaderLine}`}>
-        <button
-          onClick={() => onLaunch(account.id, false)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 font-semibold rounded shadow-sm transition-all duration-200 shrink-0 ${theme.launchBtn}`}
-          title="Iniciar janela do Chrome com este perfil"
-        >
-          <span>{isLaunching ? 'Abrindo...' : 'Iniciar Janela'}</span>
-          <ExternalLink className="w-3 h-3" />
-        </button>
-
-        <div className="flex items-center gap-1 text-neutral-400">
-          <button
-            onClick={handleDryRun}
-            className={`px-2 py-1 rounded transition-all duration-200 flex items-center gap-1 text-[10px] ${theme.validBtn}`}
-            title="Validar comando do perfil"
-          >
-            <Play className="w-2.5 h-2.5 text-neutral-400" />
-            <span>Validar</span>
-          </button>
-
-          <button
-            onClick={handleCopyCommand}
-            className={`px-2 py-1 rounded transition-all duration-200 flex items-center gap-1 text-[10px] ${theme.cmdBtn}`}
-            title="Copiar comando de terminal Linux"
-          >
-            {copiedCmd ? (
-              <Check className="w-2.5 h-2.5 text-emerald-400" />
-            ) : (
-              <Terminal className="w-2.5 h-2.5 text-neutral-400" />
-            )}
-            <span>{copiedCmd ? 'Copiado' : 'Comando'}</span>
-          </button>
         </div>
       </div>
     </div>
