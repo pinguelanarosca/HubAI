@@ -17,29 +17,112 @@ echo "         INSTALADOR OFICIAL HUBAI - LINUX         "
 echo "=================================================="
 echo ""
 
-# 1. Checagem de Pré-requisitos
-echo "[1/6] Verificando pré-requisitos do sistema..."
+# 1. Checagem e Auto-Instalação de Pré-requisitos
+echo "[1/6] Verificando e preparando pré-requisitos do sistema..."
+
+export PATH="$HOME/.local/bin:$INSTALL_DIR/node/bin:/usr/local/bin:$PATH"
 
 if ! command -v bash &>/dev/null; then
   echo "ERRO: bash é obrigatório."
   exit 1
 fi
 
-if ! command -v node &>/dev/null; then
-  echo "ERRO: Node.js não foi encontrado no PATH."
-  echo "Instale o Node.js v18 ou superior no seu sistema Linux antes de continuar."
-  exit 1
-fi
+check_node_ready() {
+  if command -v node &>/dev/null && command -v npm &>/dev/null; then
+    local major
+    major=$(node -v 2>/dev/null | cut -d'v' -f2 | cut -d'.' -f1)
+    if [ -n "$major" ] && [ "$major" -ge 18 ] 2>/dev/null; then
+      return 0
+    fi
+  fi
+  return 1
+}
 
-NODE_MAJOR=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
-if [ "$NODE_MAJOR" -lt 18 ]; then
-  echo "ERRO: Node.js versão 18 ou superior é necessário. Versão detectada: $(node -v)"
-  exit 1
-fi
+# Auto-instalação e provisionamento de Node.js caso ausente ou desatualizado (< v18)
+if ! check_node_ready; then
+  echo "Node.js v18+ não foi detectado no PATH."
+  echo "Providenciando Node.js automaticamente para o HubAI..."
 
-if ! command -v npm &>/dev/null; then
-  echo "ERRO: npm não foi encontrado no PATH."
-  exit 1
+  ARCH=$(uname -m)
+  case "$ARCH" in
+    x86_64) NODE_ARCH="x64" ;;
+    aarch64|arm64) NODE_ARCH="arm64" ;;
+    armv7l) NODE_ARCH="armv7l" ;;
+    *) NODE_ARCH="x64" ;;
+  esac
+
+  NODE_VERSION="v20.18.0"
+  NODE_DIST_NAME="node-${NODE_VERSION}-linux-${NODE_ARCH}"
+  NODE_INSTALL_TARGET="$INSTALL_DIR/node"
+  TEMP_NODE_DIR=$(mktemp -d /tmp/hubai-node-install-XXXXXX)
+
+  DOWNLOAD_CMD=""
+  if command -v curl &>/dev/null; then
+    DOWNLOAD_CMD="curl -fsSL"
+  elif command -v wget &>/dev/null; then
+    DOWNLOAD_CMD="wget -qO-"
+  fi
+
+  # Método 1: Download oficial de binário pré-compilado (100% isolado, sem necessidade de sudo/root)
+  if [ -n "$DOWNLOAD_CMD" ]; then
+    echo "Baixando Node.js LTS oficial ($NODE_VERSION para $NODE_ARCH)..."
+    mkdir -p "$NODE_INSTALL_TARGET"
+    mkdir -p "$BIN_DIR"
+
+    SUCCESS_DOWNLOAD=false
+    if $DOWNLOAD_CMD "https://nodejs.org/dist/${NODE_VERSION}/${NODE_DIST_NAME}.tar.xz" 2>/dev/null | tar -xJ -C "$TEMP_NODE_DIR" 2>/dev/null; then
+      SUCCESS_DOWNLOAD=true
+    elif $DOWNLOAD_CMD "https://nodejs.org/dist/${NODE_VERSION}/${NODE_DIST_NAME}.tar.gz" 2>/dev/null | tar -xz -C "$TEMP_NODE_DIR" 2>/dev/null; then
+      SUCCESS_DOWNLOAD=true
+    fi
+
+    if [ "$SUCCESS_DOWNLOAD" = true ] && [ -d "$TEMP_NODE_DIR/$NODE_DIST_NAME" ]; then
+      cp -r "$TEMP_NODE_DIR/$NODE_DIST_NAME/"* "$NODE_INSTALL_TARGET/"
+      ln -sf "$NODE_INSTALL_TARGET/bin/node" "$BIN_DIR/node"
+      ln -sf "$NODE_INSTALL_TARGET/bin/npm" "$BIN_DIR/npm"
+      ln -sf "$NODE_INSTALL_TARGET/bin/npx" "$BIN_DIR/npx"
+      export PATH="$NODE_INSTALL_TARGET/bin:$BIN_DIR:$PATH"
+      echo "✓ Node.js ($NODE_VERSION) provisionado com sucesso em $NODE_INSTALL_TARGET"
+    fi
+    rm -rf "$TEMP_NODE_DIR"
+  fi
+
+  # Método 2: Tentativa via gerenciador de pacotes se método isolado não concluir
+  if ! check_node_ready; then
+    echo "Tentando instalar Node.js via gerenciador de pacotes do sistema..."
+    if command -v apt-get &>/dev/null; then
+      if [ "$EUID" -eq 0 ]; then
+        curl -fsSL https://deb.nodesource.com/setup_20.x 2>/dev/null | bash - 2>/dev/null || true
+        apt-get update && apt-get install -y nodejs || true
+      elif command -v sudo &>/dev/null; then
+        echo "Solicitando permissão para instalar Node.js via apt-get..."
+        curl -fsSL https://deb.nodesource.com/setup_20.x 2>/dev/null | sudo -E bash - 2>/dev/null || true
+        sudo apt-get update && sudo apt-get install -y nodejs || true
+      fi
+    elif command -v dnf &>/dev/null; then
+      if [ "$EUID" -eq 0 ]; then
+        dnf install -y nodejs npm || true
+      elif command -v sudo &>/dev/null; then
+        sudo dnf install -y nodejs npm || true
+      fi
+    elif command -v pacman &>/dev/null; then
+      if [ "$EUID" -eq 0 ]; then
+        pacman -Sy --noconfirm nodejs npm || true
+      elif command -v sudo &>/dev/null; then
+        sudo pacman -Sy --noconfirm nodejs npm || true
+      fi
+    fi
+  fi
+
+  # Verificação de segurança
+  if ! check_node_ready; then
+    echo "ERRO: Não foi possível providenciar o Node.js automaticamente."
+    echo "Por favor, instale o Node.js v18 ou superior no seu sistema Linux e execute o instalador novamente:"
+    echo "  Ubuntu/Debian: curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs"
+    echo "  Fedora: sudo dnf install -y nodejs npm"
+    echo "  Arch: sudo pacman -S nodejs npm"
+    exit 1
+  fi
 fi
 
 echo "✓ Node.js $(node -v) e npm $(npm -v) verificados com sucesso."
@@ -53,7 +136,7 @@ mkdir -p "$CONFIG_DIR/backups"
 mkdir -p "$BIN_DIR"
 mkdir -p "$DESKTOP_DIR"
 
-# 3. Obter Código-Fonte (Local ou do GitHub)
+# 3. Obter Código-Fonte (Local, Git ou Download Direto)
 echo "[3/6] Configurando arquivos da aplicação em $INSTALL_DIR..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -80,8 +163,18 @@ elif command -v git &>/dev/null; then
   cp -r "$TEMP_CLONE/"* "$INSTALL_DIR/" 2>/dev/null || true
   cp -r "$TEMP_CLONE/".[!.]* "$INSTALL_DIR/" 2>/dev/null || true
   rm -rf "$TEMP_CLONE"
+elif command -v curl &>/dev/null || command -v wget &>/dev/null; then
+  echo "Baixando código-fonte oficial do repositório $REPO_URL..."
+  TEMP_CLONE=$(mktemp -d /tmp/hubai-tarball-XXXXXX)
+  if command -v curl &>/dev/null; then
+    curl -fsSL "https://github.com/pinguelanarosca/HubAI/archive/refs/heads/main.tar.gz" | tar -xz -C "$TEMP_CLONE"
+  else
+    wget -qO- "https://github.com/pinguelanarosca/HubAI/archive/refs/heads/main.tar.gz" | tar -xz -C "$TEMP_CLONE"
+  fi
+  cp -r "$TEMP_CLONE/HubAI-main/"* "$INSTALL_DIR/" 2>/dev/null || cp -r "$TEMP_CLONE/"*/* "$INSTALL_DIR/" 2>/dev/null || true
+  rm -rf "$TEMP_CLONE"
 else
-  echo "ERRO: git não está instalado e nenhum diretório local com o código foi encontrado."
+  echo "ERRO: Nem git, curl ou wget foram encontrados para baixar a aplicação."
   exit 1
 fi
 
@@ -108,6 +201,7 @@ cat << 'EOF' > "$BIN_DIR/hubai"
 # ==============================================================================
 INSTALL_DIR="$HOME/.local/share/hubai"
 export HUBAI_CONFIG_DIR="$HOME/.config/hubai"
+export PATH="$HOME/.local/bin:$INSTALL_DIR/node/bin:/usr/local/bin:$PATH"
 LOG_DIR="$HUBAI_CONFIG_DIR/logs"
 LOG_FILE="$LOG_DIR/hubai.log"
 PID_FILE="$HUBAI_CONFIG_DIR/hubai.pid"

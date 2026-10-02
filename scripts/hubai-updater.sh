@@ -43,6 +43,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Garantir que binários locais do Node.js estejam disponíveis no PATH
+export PATH="$HOME/.local/bin:$INSTALL_DIR/node/bin:$TARGET_DIR/node/bin:/usr/local/bin:$PATH"
+
 # Logging helper
 log() {
   local msg="[$(date '+%Y-%m-%d %H:%M:%S')] $1"
